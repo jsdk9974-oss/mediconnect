@@ -1,104 +1,112 @@
-// API Route — Recherche de médecins via l'Annuaire Santé (gouvernement français)
-// Source : api.annuaire.sante.fr — gratuit, sans clé, toute la France
+// API médecins — Annuaire Santé (ANS - gouvernement français)
+// API publique, sans clé, toute la France
 
-const CODES_SPECIALITES = {
-  'Médecin généraliste':      { code: 'SM26', libelle: 'Médecine générale' },
-  'Cardiologue':              { code: 'SM04', libelle: 'Cardiologie' },
-  'Dermatologue':             { code: 'SM07', libelle: 'Dermatologie' },
-  'Neurologue':               { code: 'SM18', libelle: 'Neurologie' },
-  'Pneumologue':              { code: 'SM22', libelle: 'Pneumologie' },
-  'Gastro-entérologue':       { code: 'SM09', libelle: 'Gastro-entérologie' },
-  'Rhumatologue':             { code: 'SM27', libelle: 'Rhumatologie' },
-  'Ophtalmologue':            { code: 'SM19', libelle: 'Ophtalmologie' },
-  'ORL':                      { code: 'SM20', libelle: 'Oto-rhino-laryngologie' },
-  'Gynécologue':              { code: 'SM10', libelle: 'Gynécologie médicale' },
-  'Urologue':                 { code: 'SM30', libelle: 'Urologie' },
-  'Psychiatre':               { code: 'SM23', libelle: 'Psychiatrie' },
-  'Endocrinologue':           { code: 'SM08', libelle: 'Endocrinologie' },
-  'Chirurgien':               { code: 'SM05', libelle: 'Chirurgie générale' },
-  'Médecin urgentiste':       { code: 'SM26', libelle: 'Médecine générale' },
+const SPECIALITES_MAP = {
+  'Médecin généraliste':   'Médecine générale',
+  'Médecin urgentiste':    'Médecine générale',
+  'Cardiologue':           'Cardiologie et maladies vasculaires',
+  'Dermatologue':          'Dermatologie et vénéréologie',
+  'Neurologue':            'Neurologie',
+  'Pneumologue':           'Pneumologie',
+  'Gastro-entérologue':   'Gastro-entérologie et hépatologie',
+  'Rhumatologue':          'Rhumatologie',
+  'Ophtalmologue':         'Ophtalmologie',
+  'ORL':                   'Oto-rhino-laryngologie',
+  'Gynécologue':           'Gynécologie médicale',
+  'Urologue':              'Urologie',
+  'Psychiatre':            'Psychiatrie',
+  'Endocrinologue':        'Endocrinologie-diabétologie-nutrition',
+  'Chirurgien':            'Chirurgie générale',
 }
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url)
   const specialiste = searchParams.get('specialiste') || 'Médecin généraliste'
   const codePostal = searchParams.get('codePostal') || ''
-  const ville = searchParams.get('ville') || ''
 
-  if (!codePostal && !ville) {
+  if (!codePostal) {
     return Response.json({ error: 'Code postal requis' }, { status: 400 })
   }
 
-  const spec = CODES_SPECIALITES[specialiste] || CODES_SPECIALITES['Médecin généraliste']
+  const specialiteLibelle = SPECIALITES_MAP[specialiste] || 'Médecine générale'
 
   try {
-    // API Annuaire Santé — ANS (Agence du Numérique en Santé)
-    const params = new URLSearchParams({
+    // API Annuaire Santé ANS — endpoint officiel
+    const url = `https://api.annuaire.sante.fr/api/ps?` + new URLSearchParams({
       codePostal: codePostal,
-      specialiteProfessionnel: spec.libelle,
-      limit: '8',
-      offset: '0',
+      professionLibelle: 'Médecin',
+      savoirFaireLibelle: specialiteLibelle,
+      limit: '10',
+      page: '1',
     })
 
-    const url = `https://api.annuaire.sante.fr/api/ps?${params.toString()}`
-    
     const res = await fetch(url, {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      next: { revalidate: 3600 } // Cache 1h
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(8000),
     })
 
-    if (!res.ok) {
-      throw new Error(`API Annuaire erreur: ${res.status}`)
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
     const data = await res.json()
-    
-    // Formatage des résultats
-    const medecins = (data.items || data || []).slice(0, 6).map(m => ({
-      nom: formatNom(m),
-      specialite: spec.libelle,
-      adresse: formatAdresse(m),
-      codePostal: m.codePostalResidence || m.codePostal || codePostal,
-      ville: m.libelleCommune || m.commune || ville,
-      telephone: m.telephone || null,
-      rpps: m.idPP || m.rpps || null,
-    }))
+    const items = data?.items || data?.results || data || []
 
-    return Response.json({ succes: true, medecins, total: data.total || medecins.length })
+    if (!Array.isArray(items) || items.length === 0) {
+      return Response.json({ succes: false, medecins: [], message: 'Aucun médecin trouvé' })
+    }
 
-  } catch (error) {
-    console.error('Erreur API Annuaire:', error.message)
-    
-    // Fallback : redirection vers Doctolib avec bons paramètres
+    const medecins = items.slice(0, 8).map(m => {
+      const exercice = m.exercicesProfessionnels?.[0] || {}
+      const adresse = exercice.adresseCorrespondance || m.adresseCorrespondance || {}
+      const horaires = exercice.horaires || []
+
+      return {
+        nom: `Dr. ${m.prenomExercice || m.prenom || ''} ${m.nomExercice || m.nom || ''}`.trim(),
+        specialite: specialiteLibelle,
+        adresse: [
+          adresse.numeroVoie,
+          adresse.libelleVoie,
+          adresse.codePostal,
+          adresse.libelleCommune
+        ].filter(Boolean).join(' ') || `${codePostal}`,
+        telephone: m.telephone || exercice.telephone || null,
+        teleconsultation: m.teleconsultation || false,
+        horairesTexte: formatHoraires(horaires),
+        rpps: m.idPP || null,
+      }
+    })
+
+    return Response.json({ succes: true, medecins })
+
+  } catch (err) {
+    console.error('API Annuaire erreur:', err.message)
+
+    // Fallback: générer des liens Doctolib/Keldoc bien formés
     return Response.json({
       succes: false,
       fallback: true,
-      urlDoctolib: `https://www.doctolib.fr/${slugSpecialite(specialiste)}/${slugVille(ville || codePostal)}`,
-      message: "Service temporairement indisponible"
+      medecins: [],
+      liens: {
+        doctolib: buildDoctolib(specialiste, codePostal),
+        keldoc: buildKeldoc(specialiste, codePostal),
+        maiia: buildMaiia(specialiste, codePostal),
+      }
     })
   }
 }
 
-function formatNom(m) {
-  const prenom = m.prenomExercice || m.prenom || ''
-  const nom = m.nomExercice || m.nom || 'Médecin'
-  return `Dr. ${prenom} ${nom}`.trim()
+function formatHoraires(horaires) {
+  if (!horaires || horaires.length === 0) return null
+  const jours = { '1': 'Lun', '2': 'Mar', '3': 'Mer', '4': 'Jeu', '5': 'Ven', '6': 'Sam', '7': 'Dim' }
+  return horaires.slice(0, 3).map(h => {
+    const jour = jours[h.jour] || h.jour
+    const debut = h.heureDebut?.slice(0, 5) || ''
+    const fin = h.heureFin?.slice(0, 5) || ''
+    return debut && fin ? `${jour} ${debut}-${fin}` : jour
+  }).join(' · ')
 }
 
-function formatAdresse(m) {
-  const rue = m.libelleVoieResidence || m.adresse || ''
-  const cp = m.codePostalResidence || m.codePostal || ''
-  const ville = m.libelleCommune || m.commune || ''
-  if (rue && cp) return `${rue}, ${cp} ${ville}`
-  if (cp && ville) return `${cp} ${ville}`
-  return ville || 'Adresse non disponible'
-}
-
-function slugSpecialite(s) {
-  const map = {
+function buildDoctolib(specialiste, cp) {
+  const slugs = {
     'Médecin généraliste': 'medecin-generaliste',
     'Cardiologue': 'cardiologue',
     'Dermatologue': 'dermatologue',
@@ -106,7 +114,7 @@ function slugSpecialite(s) {
     'Pneumologue': 'pneumologue',
     'Gastro-entérologue': 'gastro-enterologue',
     'Rhumatologue': 'rhumatologue',
-    'Ophtalmologue': 'ophtalmologue',
+    'Ophtalmologue': 'ophtalmologiste',
     'ORL': 'oto-rhino-laryngologiste-ent',
     'Gynécologue': 'gynecologue-obstetricien',
     'Urologue': 'urologue',
@@ -115,13 +123,14 @@ function slugSpecialite(s) {
     'Chirurgien': 'chirurgien-general',
     'Médecin urgentiste': 'medecin-generaliste',
   }
-  return map[s] || 'medecin-generaliste'
+  const slug = slugs[specialiste] || 'medecin-generaliste'
+  return `https://www.doctolib.fr/${slug}?location=${cp}`
 }
 
-function slugVille(v) {
-  return v.toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9-]/g, '')
+function buildKeldoc(specialiste, cp) {
+  return `https://www.keldoc.com/search?speciality=${encodeURIComponent(specialiste)}&location=${cp}`
 }
 
+function buildMaiia(specialiste, cp) {
+  return `https://www.maiia.com/medecin/?near=${cp}&speciality=${encodeURIComponent(specialiste)}`
+}
