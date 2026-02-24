@@ -4,10 +4,10 @@ import { useState, useRef, useCallback } from 'react'
 import Link from 'next/link'
 
 const NIVEAUX = {
-  1: { bg:'#fee2e2', color:'#991b1b', border:'#fca5a5', emoji:'🚨', texte:'Urgences maintenant' },
-  2: { bg:'#ffedd5', color:'#9a3412', border:'#fdba74', emoji:'⚠️', texte:'Consulter sous 24h' },
-  3: { bg:'#fef9c3', color:'#854d0e', border:'#fde047', emoji:'📅', texte:'Consulter cette semaine' },
-  4: { bg:'#dcfce7', color:'#166534', border:'#86efac', emoji:'✅', texte:'Non urgent' },
+  1: { bg:'#fef2f2', color:'#b91c1c', border:'#f87171', emoji:'🚨', texte:'Urgences maintenant' },
+  2: { bg:'#fff7ed', color:'#c2410c', border:'#fb923c', emoji:'⚠️', texte:'Consulter sous 24h' },
+  3: { bg:'#fefce8', color:'#92400e', border:'#fbbf24', emoji:'📅', texte:'Consulter cette semaine' },
+  4: { bg:'#f0fdf4', color:'#15803d', border:'#4ade80', emoji:'✅', texte:'Non urgent' },
 }
 
 export default function Analyse() {
@@ -23,8 +23,8 @@ export default function Analyse() {
   const [loading, setLoading] = useState(false)
   const [resultat, setResultat] = useState(null)
   const [medecins, setMedecins] = useState([])
-  const [liensRdv, setLiensRdv] = useState(null)
-  const [medecinLoading, setMedecinLoading] = useState(false)
+  const [liens, setLiens] = useState(null)
+  const [medLoading, setMedLoading] = useState(false)
   const [erreur, setErreur] = useState(null)
   const fileRef = useRef(null)
   const cameraRef = useRef(null)
@@ -59,149 +59,197 @@ export default function Analyse() {
     if (cameraRef.current) cameraRef.current.value = ''
   }
 
-  const chercherMedecins = async (specialiste, cp) => {
-    if (!cp) return
-    setMedecinLoading(true)
+  const chercherMedecins = async (specialiste, cp, v) => {
+    if (!cp && !v) return
+    setMedLoading(true)
     try {
-      const r = await fetch(`/api/medecins?specialiste=${encodeURIComponent(specialiste)}&codePostal=${cp}`)
+      const r = await fetch(`/api/medecins?specialiste=${encodeURIComponent(specialiste)}&codePostal=${cp}&ville=${encodeURIComponent(v)}`)
       const d = await r.json()
-      if (d.succes && d.medecins?.length > 0) setMedecins(d.medecins)
-      else setLiensRdv(d.liens || null)
+      setMedecins(d.medecins || [])
+      setLiens(d.liens || null)
     } catch {}
-    setMedecinLoading(false)
+    setMedLoading(false)
   }
 
   const analyser = async () => {
     if (symptomes.trim().length < 3 && !photo) { setErreur('Décrivez vos symptômes ou ajoutez une photo.'); return }
-    setLoading(true); setErreur(null); setResultat(null); setMedecins([]); setLiensRdv(null)
+    setLoading(true); setErreur(null); setResultat(null); setMedecins([]); setLiens(null)
     try {
       let photoBase64 = null
-      if (photo) {
-        photoBase64 = await new Promise((res,rej) => {
-          const r = new FileReader()
-          r.onload = e => res(e.target.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(photo)
-        })
-      }
-      const resp = await fetch('/api/analyser', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ symptomes, age, duree, ville, codePostal:cpInput, photoBase64, photoType:photo?.type })
-      })
+      if (photo) photoBase64 = await new Promise((res,rej) => { const r = new FileReader(); r.onload = e => res(e.target.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(photo) })
+      const resp = await fetch('/api/analyser', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symptomes,age,duree,ville,codePostal:cpInput,photoBase64,photoType:photo?.type}) })
       const d = await resp.json()
       if (d.error) setErreur(d.error)
-      else { setResultat(d.resultat); chercherMedecins(d.resultat.specialiste, cpInput) }
+      else { setResultat(d.resultat); chercherMedecins(d.resultat.specialiste, cpInput, ville) }
     } catch { setErreur("Erreur de connexion. Réessayez.") }
     setLoading(false)
   }
 
-  const reset = () => { setResultat(null); setSymptomes(''); setAge(''); setDuree(''); setMedecins([]); setLiensRdv(null); supprimerPhoto() }
+  const reset = () => { setResultat(null); setSymptomes(''); setAge(''); setDuree(''); setMedecins([]); setLiens(null); supprimerPhoto() }
   const peutAnalyser = !loading && (symptomes.trim().length >= 3 || photo)
   const niv = resultat ? NIVEAUX[resultat.niveau_urgence] || NIVEAUX[3] : null
 
-  const css = `
-    .page { padding: 90px 5% 60px; min-height:100vh; background:#eef2f7; font-family:'DM Sans',sans-serif; }
-    .conteneur { max-width:740px; margin:0 auto; }
-    .titre { text-align:center; margin-bottom:28px; }
-    .titre h1 { font-family:'Playfair Display',serif; font-size:clamp(1.7rem,4vw,2.3rem); color:#1e293b; margin-bottom:8px; }
-    .titre p { color:#64748b; font-size:0.97rem; }
-    .carte { background:white; border-radius:18px; border:2.5px solid #bfcfe0; box-shadow:0 6px 28px rgba(15,40,80,0.11); padding:28px; margin-bottom:20px; }
-    .bloc { background:#e9f0f9; border:2px solid #b0c4d8; border-radius:14px; padding:18px; margin-bottom:16px; }
-    .bloc-vert { background:#e6f5ef; border:2px solid #9acdb9; border-radius:14px; padding:18px; margin-bottom:16px; }
-    .bloc-titre { font-size:0.8rem; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; margin-bottom:12px; }
-    .label { display:block; font-weight:700; font-size:0.83rem; color:#334155; margin-bottom:5px; }
-    .input { width:100%; padding:12px 14px; border:2px solid #8faec7; border-radius:10px; font-family:'DM Sans',sans-serif; font-size:0.93rem; color:#1e293b; background:white; outline:none; transition:border-color 0.2s; }
-    .input:focus { border-color:#1a5c9a; }
-    .select { width:100%; padding:12px 14px; border:2px solid #8faec7; border-radius:10px; font-family:'DM Sans',sans-serif; font-size:0.93rem; color:#1e293b; background:white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231a5c9a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center; appearance:none; cursor:pointer; outline:none; }
-    .select:focus { border-color:#1a5c9a; }
-    .select:disabled { opacity:0.4; cursor:not-allowed; }
-    .grille2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-    @media(max-width:560px){.grille2{grid-template-columns:1fr;}}
-    .champ { display:flex; flex-direction:column; }
-    .photo-btns { display:flex; gap:12px; flex-wrap:wrap; }
-    .photo-btn { flex:1; min-width:130px; background:white; border-radius:12px; padding:14px 10px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:6px; font-weight:700; font-size:0.83rem; font-family:'DM Sans',sans-serif; transition:transform 0.15s; }
-    .photo-btn:hover { transform:translateY(-2px); }
-    .photo-btn-bleu { border:2px solid #1a5c9a; color:#1a5c9a; }
-    .photo-btn-vert { border:2px solid #0e8a6e; color:#0e8a6e; }
-    .btn-analyser { width:100%; padding:17px; border-radius:50px; border:none; font-family:'DM Sans',sans-serif; font-size:1rem; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s; }
-    .btn-ok { background:linear-gradient(135deg,#1a5c9a,#1e7bc4); color:white; box-shadow:0 5px 24px rgba(26,92,154,0.35); }
-    .btn-ok:hover { transform:translateY(-2px); box-shadow:0 8px 30px rgba(26,92,154,0.42); }
-    .btn-off { background:#cbd5e1; color:#94a3b8; cursor:not-allowed; }
-    .spinner { width:22px; height:22px; border:3px solid rgba(255,255,255,0.3); border-top-color:white; border-radius:50%; animation:spin 0.7s linear infinite; }
-    .spinner-bleu { width:22px; height:22px; border:3px solid #c3d2e8; border-top-color:#1a5c9a; border-radius:50%; animation:spin 0.7s linear infinite; flex-shrink:0; }
-    @keyframes spin { to{transform:rotate(360deg);} }
-    .erreur { background:#fee2e2; border:2px solid #fca5a5; color:#991b1b; padding:12px 16px; border-radius:10px; margin-bottom:16px; font-size:0.88rem; }
-    .carte-res { background:white; border-radius:18px; border:2.5px solid #bfcfe0; border-left:6px solid #1a5c9a; box-shadow:0 6px 28px rgba(15,40,80,0.11); padding:28px; animation:app 0.4s ease; }
-    @keyframes app { from{opacity:0;transform:translateY(16px);} to{opacity:1;transform:translateY(0);} }
-    .badge-niv { display:inline-flex; align-items:center; gap:8px; padding:8px 18px; border-radius:50px; font-weight:800; font-size:0.85rem; margin-bottom:16px; border:2px solid; }
-    .badge-lieu { display:inline-flex; align-items:center; gap:5px; background:#e8f0fa; color:#1a5c9a; border:1.5px solid #93b4d8; padding:4px 12px; border-radius:50px; font-size:0.78rem; font-weight:700; margin-bottom:12px; margin-right:6px; }
-    .bloc-conseils { background:#f0f6ff; border:2px solid #b8ccdd; border-radius:12px; padding:16px; margin-top:16px; }
-    .sep { margin-top:24px; padding-top:22px; border-top:2px solid #e2e8f0; }
-    .sec-titre { font-family:'Playfair Display',serif; font-size:1.1rem; color:#1e293b; margin-bottom:14px; }
-    .carte-med { background:#f4f8fd; border:2px solid #b8ccdd; border-radius:14px; padding:15px 16px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
-    .med-nom { font-weight:800; color:#1e293b; font-size:0.93rem; margin-bottom:3px; }
-    .med-spec { color:#1a5c9a; font-size:0.8rem; font-weight:700; margin-bottom:4px; }
-    .med-info { color:#64748b; font-size:0.79rem; margin-bottom:2px; display:flex; align-items:center; gap:4px; }
-    .btns-rdv { display:flex; flex-direction:column; gap:7px; min-width:108px; }
-    .btn-rdv { padding:8px 12px; border-radius:50px; font-size:0.76rem; font-weight:700; text-align:center; cursor:pointer; text-decoration:none; display:block; white-space:nowrap; font-family:'DM Sans',sans-serif; transition:all 0.2s; border:none; }
-    .rdv-bleu { background:#1a5c9a; color:white; }
-    .rdv-vert { background:#0e8a6e; color:white; }
-    .rdv-bleu:hover { background:#1568b0; }
-    .rdv-vert:hover { background:#0a7560; }
-    .fallback { background:#f1f5fb; border:2px solid #b8ccdd; border-radius:14px; padding:20px; text-align:center; }
-    .btns-plat { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:14px; }
-    .btn-plat { padding:11px 20px; border-radius:50px; font-weight:700; font-size:0.85rem; text-decoration:none; display:inline-block; transition:transform 0.2s; }
-    .btn-plat:hover { transform:translateY(-2px); }
-    .mention { background:#fff7ed; border:2px solid #fed7aa; border-radius:12px; padding:14px 16px; font-size:0.8rem; color:#9a3412; margin-top:18px; line-height:1.6; }
-    .btn-nouv { background:transparent; border:2px solid #1a5c9a; color:#1a5c9a; padding:11px 26px; border-radius:50px; cursor:pointer; margin-top:16px; font-weight:700; font-family:'DM Sans',sans-serif; font-size:0.88rem; transition:all 0.2s; }
-    .btn-nouv:hover { background:#e8f0fa; }
-    .tag-tel { display:inline-flex; align-items:center; gap:4px; background:#e0f2fe; color:#0369a1; border:1.5px solid #7dd3fc; padding:2px 9px; border-radius:50px; font-size:0.7rem; font-weight:700; margin-top:4px; }
-    .loading-med { display:flex; align-items:center; gap:12px; background:#eef2f7; border:2px solid #b8ccdd; border-radius:12px; padding:16px 18px; color:#1a5c9a; font-size:0.88rem; font-weight:600; }
-  `
-
   return (
     <>
-      <style>{css}</style>
-      <nav className="nav">
-        <Link href="/" className="nav-logo">Medi<span style={{color:'#0e8a6e'}}>Connect</span></Link>
-        <Link href="/"><button className="nav-btn" style={{background:'transparent',color:'#1a5c9a',border:'2px solid #1a5c9a'}}>← Accueil</button></Link>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        .pg { min-height:100vh; background: linear-gradient(160deg, #0f2942 0%, #1a4870 40%, #1a5c9a 100%); padding: 80px 16px 60px; font-family: 'DM Sans', sans-serif; }
+        .ctn { max-width: 680px; margin: 0 auto; }
+        .hero { text-align: center; margin-bottom: 32px; }
+        .hero h1 { font-family: 'Playfair Display', serif; font-size: clamp(1.8rem,5vw,2.6rem); color: white; margin-bottom: 10px; line-height: 1.2; }
+        .hero p { color: rgba(255,255,255,0.7); font-size: 1rem; }
+        
+        /* CARTE FORMULAIRE */
+        .form-card { background: rgba(255,255,255,0.97); border-radius: 24px; padding: 32px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+        
+        /* SECTIONS */
+        .sec { border-radius: 14px; padding: 20px; margin-bottom: 18px; }
+        .sec-bleu { background: #f0f6ff; border: 2px solid #bbd0eb; }
+        .sec-vert { background: #f0faf5; border: 2px solid #9dd0b8; }
+        .sec-titre { font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 14px; }
+        .st-bleu { color: #1a4870; }
+        .st-vert { color: #0a6b52; }
+        
+        /* CHAMPS */
+        .label { display: block; font-size: 0.82rem; font-weight: 700; color: #334155; margin-bottom: 5px; }
+        .field { width: 100%; padding: 12px 14px; border: 2px solid #94a3b8; border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: 0.93rem; color: #1e293b; background: white; outline: none; transition: all 0.2s; }
+        .field:focus { border-color: #1a5c9a; box-shadow: 0 0 0 3px rgba(26,92,154,0.12); }
+        .field-sel { appearance: none; background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231a5c9a' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center; cursor: pointer; }
+        .field-sel:disabled { opacity: 0.4; cursor: not-allowed; }
+        .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        @media(max-width:500px){.g2{grid-template-columns:1fr;}}
+        
+        /* PHOTO */
+        .photo-row { display: flex; gap: 12px; }
+        .photo-btn { flex: 1; background: white; border-radius: 12px; padding: 16px 10px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; font-family: 'DM Sans', sans-serif; font-weight: 700; font-size: 0.82rem; transition: all 0.2s; }
+        .photo-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.1); }
+        .pb-bleu { border: 2px solid #1a5c9a; color: #1a5c9a; }
+        .pb-vert { border: 2px solid #0e8a6e; color: #0e8a6e; }
+        
+        /* BOUTON ANALYSER */
+        .btn-go { width: 100%; padding: 18px; border-radius: 50px; border: none; font-family: 'DM Sans', sans-serif; font-size: 1.05rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; transition: all 0.25s; margin-top: 4px; }
+        .btn-go-on { background: linear-gradient(135deg, #1a5c9a 0%, #0e8a6e 100%); color: white; box-shadow: 0 6px 28px rgba(26,92,154,0.45); }
+        .btn-go-on:hover { transform: translateY(-2px); box-shadow: 0 10px 36px rgba(26,92,154,0.5); }
+        .btn-go-off { background: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
+        
+        .spin { width: 22px; height: 22px; border: 3px solid rgba(255,255,255,0.35); border-top-color: white; border-radius: 50%; animation: sp 0.7s linear infinite; }
+        .spin-b { width: 22px; height: 22px; border: 3px solid #c3d2e8; border-top-color: #1a5c9a; border-radius: 50%; animation: sp 0.7s linear infinite; flex-shrink: 0; }
+        @keyframes sp { to{transform:rotate(360deg);} }
+        
+        .err { background: #fef2f2; border: 2px solid #f87171; color: #b91c1c; padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; font-size: 0.88rem; }
+
+        /* CARTE RÉSULTAT */
+        .res-card { background: white; border-radius: 24px; padding: 32px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); animation: fadeUp 0.4s ease; }
+        @keyframes fadeUp { from{opacity:0;transform:translateY(20px);} to{opacity:1;transform:translateY(0);} }
+        
+        .badge-niv { display: inline-flex; align-items: center; gap: 8px; padding: 8px 20px; border-radius: 50px; font-weight: 800; font-size: 0.85rem; margin-bottom: 18px; border: 2px solid; }
+        .res-titre { font-family: 'Playfair Display', serif; font-size: 1.5rem; color: #1e293b; margin-bottom: 12px; line-height: 1.3; }
+        .badge-info { display: inline-flex; align-items: center; gap: 5px; padding: 4px 12px; border-radius: 50px; font-size: 0.78rem; font-weight: 700; margin-right: 6px; margin-bottom: 14px; }
+        .bi-bleu { background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; }
+        .bi-vert { background: #dcfce7; color: #15803d; border: 1.5px solid #86efac; }
+        .res-texte { color: #475569; line-height: 1.85; font-size: 0.97rem; margin-bottom: 20px; }
+        
+        .conseils-bloc { background: #f8faff; border: 2px solid #c3d2e8; border-radius: 14px; padding: 18px; margin-bottom: 24px; }
+        .conseils-titre { font-weight: 800; font-size: 0.88rem; color: #1e293b; margin-bottom: 10px; }
+        .conseils-liste { padding-left: 18px; }
+        .conseils-liste li { color: #475569; margin-bottom: 7px; font-size: 0.9rem; line-height: 1.5; }
+        
+        /* MÉDECINS */
+        .sep { border-top: 2px solid #e2e8f0; padding-top: 24px; margin-top: 8px; }
+        .sec-h3 { font-family: 'Playfair Display', serif; font-size: 1.2rem; color: #1e293b; margin-bottom: 16px; }
+        
+        .med-card { background: #f8faff; border: 2px solid #bbd0eb; border-radius: 16px; padding: 18px 20px; margin-bottom: 12px; display: flex; gap: 16px; align-items: flex-start; }
+        .med-info { flex: 1; }
+        .med-nom { font-weight: 800; color: #1e293b; font-size: 0.97rem; margin-bottom: 4px; }
+        .med-spec { color: #1a5c9a; font-size: 0.8rem; font-weight: 700; margin-bottom: 6px; }
+        .med-ligne { display: flex; align-items: center; gap: 6px; color: #64748b; font-size: 0.8rem; margin-bottom: 3px; }
+        .med-tel { color: #1a5c9a; font-weight: 700; text-decoration: none; }
+        .med-tel:hover { text-decoration: underline; }
+        .tag-tel { display: inline-flex; align-items: center; gap: 4px; background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; padding: 2px 8px; border-radius: 50px; font-size: 0.7rem; font-weight: 700; margin-top: 5px; }
+        
+        .med-btns { display: flex; flex-direction: column; gap: 8px; min-width: 115px; }
+        .mbtn { display: block; padding: 10px 14px; border-radius: 50px; font-family: 'DM Sans', sans-serif; font-size: 0.78rem; font-weight: 800; text-align: center; text-decoration: none; cursor: pointer; transition: all 0.2s; border: none; white-space: nowrap; }
+        .mbtn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+        .mb-bleu { background: #1a5c9a; color: white; box-shadow: 0 3px 10px rgba(26,92,154,0.3); }
+        .mb-vert { background: #0e8a6e; color: white; box-shadow: 0 3px 10px rgba(14,138,110,0.3); }
+
+        /* FALLBACK LIENS */
+        .fallback-box { background: linear-gradient(135deg, #f0f6ff, #f0faf5); border: 2px solid #bbd0eb; border-radius: 16px; padding: 24px; text-align: center; }
+        .fallback-titre { font-weight: 700; color: #1e293b; font-size: 1rem; margin-bottom: 6px; }
+        .fallback-sub { color: #64748b; font-size: 0.85rem; margin-bottom: 18px; }
+        .lien-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 400px; margin: 0 auto; }
+        @media(max-width:400px){.lien-grid{grid-template-columns:1fr;}}
+        .lien-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 10px; border-radius: 14px; text-decoration: none; font-family: 'DM Sans', sans-serif; font-weight: 800; font-size: 0.85rem; transition: all 0.25s; }
+        .lien-btn:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+        .lien-btn span { font-size: 1.5rem; }
+        .lb-doctolib { background: #0596DE; color: white; }
+        .lb-teleconsult { background: linear-gradient(135deg,#1a5c9a,#0e8a6e); color: white; }
+        .lb-keldoc { background: #6366f1; color: white; }
+        .lb-maiia { background: #0891b2; color: white; }
+        
+        .mention { background: #fff7ed; border: 2px solid #fcd34d; border-radius: 14px; padding: 14px 18px; font-size: 0.8rem; color: #92400e; margin-top: 20px; line-height: 1.7; }
+        .btn-new { background: transparent; border: 2px solid #1a5c9a; color: #1a5c9a; padding: 11px 28px; border-radius: 50px; cursor: pointer; margin-top: 18px; font-weight: 700; font-family: 'DM Sans', sans-serif; font-size: 0.9rem; transition: all 0.2s; }
+        .btn-new:hover { background: #f0f6ff; }
+        .load-box { display: flex; align-items: center; gap: 12px; background: #f0f6ff; border: 2px solid #bbd0eb; border-radius: 14px; padding: 18px 20px; color: #1a5c9a; font-size: 0.9rem; font-weight: 600; }
+      `}</style>
+
+      {/* NAV */}
+      <nav style={{position:'fixed',top:0,left:0,right:0,zIndex:100,background:'rgba(15,41,66,0.95)',backdropFilter:'blur(10px)',borderBottom:'1px solid rgba(255,255,255,0.1)',padding:'0 5%',height:'65px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+        <Link href="/" style={{fontFamily:'Playfair Display,serif',fontSize:'1.4rem',fontWeight:'700',color:'white',textDecoration:'none'}}>
+          Medi<span style={{color:'#4ade80'}}>Connect</span>
+        </Link>
+        <Link href="/" style={{textDecoration:'none'}}>
+          <button style={{background:'rgba(255,255,255,0.12)',color:'white',border:'1.5px solid rgba(255,255,255,0.25)',padding:'8px 20px',borderRadius:'50px',cursor:'pointer',fontSize:'0.85rem',fontWeight:'600',fontFamily:'DM Sans,sans-serif'}}>
+            ← Accueil
+          </button>
+        </Link>
       </nav>
 
-      <div className="page">
-        <div className="conteneur">
-          <div className="titre">
+      <div className="pg">
+        <div className="ctn">
+
+          {/* HERO */}
+          <div className="hero">
             <h1>Analysez vos symptômes</h1>
             <p>Notre IA vous oriente et trouve les médecins disponibles près de chez vous</p>
           </div>
 
+          {/* FORMULAIRE */}
           {!resultat && (
-            <div className="carte">
+            <div className="form-card">
 
               {/* SYMPTÔMES */}
-              <div className="bloc">
-                <div className="bloc-titre" style={{color:'#1a4a7a'}}>📝 Vos symptômes</div>
-                <textarea className="input" style={{minHeight:'110px',resize:'vertical'}}
-                  placeholder="Décrivez ce que vous ressentez... Ex : douleur poitrine, fièvre, difficultés à respirer..."
+              <div className="sec sec-bleu">
+                <div className="sec-titre st-bleu">📝 Décrivez vos symptômes</div>
+                <textarea className="field" style={{minHeight:'110px',resize:'vertical'}}
+                  placeholder="Ex : douleur dans le dos depuis une semaine, difficultés à me lever le matin..."
                   value={symptomes} onChange={e => setSymptomes(e.target.value)}/>
               </div>
 
               {/* PHOTO */}
-              <div className="bloc-vert">
-                <div className="bloc-titre" style={{color:'#0a6b52'}}>📸 Photo <span style={{fontWeight:'400',textTransform:'none',fontSize:'0.78rem',color:'#64748b'}}>(optionnel — utile pour lésions, plaies, boutons...)</span></div>
+              <div className="sec sec-vert">
+                <div className="sec-titre st-vert">
+                  📸 Photo <span style={{fontWeight:'400',textTransform:'none',fontSize:'0.78rem',color:'#64748b'}}>(optionnel — lésions, plaies, boutons...)</span>
+                </div>
                 {!photoPreview ? (
-                  <div className="photo-btns">
-                    <button className="photo-btn photo-btn-bleu" onClick={() => fileRef.current?.click()}>
-                      <span style={{fontSize:'1.6rem'}}>🖼️</span>Depuis la galerie
+                  <div className="photo-row">
+                    <button className="photo-btn pb-bleu" onClick={() => fileRef.current?.click()}>
+                      <span style={{fontSize:'1.8rem'}}>🖼️</span>
+                      Galerie photo
                       <span style={{fontSize:'0.7rem',color:'#94a3b8',fontWeight:'400'}}>Choisir un fichier</span>
                     </button>
-                    <button className="photo-btn photo-btn-vert" onClick={() => cameraRef.current?.click()}>
-                      <span style={{fontSize:'1.6rem'}}>📷</span>Prendre une photo
-                      <span style={{fontSize:'0.7rem',color:'#94a3b8',fontWeight:'400'}}>Appareil photo</span>
+                    <button className="photo-btn pb-vert" onClick={() => cameraRef.current?.click()}>
+                      <span style={{fontSize:'1.8rem'}}>📷</span>
+                      Appareil photo
+                      <span style={{fontSize:'0.7rem',color:'#94a3b8',fontWeight:'400'}}>Prendre une photo</span>
                     </button>
                   </div>
                 ) : (
                   <div style={{position:'relative',display:'inline-block'}}>
-                    <img src={photoPreview} alt="Photo" style={{maxWidth:'100%',maxHeight:'170px',borderRadius:'10px',border:'2px solid #9acdb9',display:'block'}}/>
-                    <button onClick={supprimerPhoto} style={{position:'absolute',top:'6px',right:'6px',background:'#dc2626',color:'white',border:'none',borderRadius:'50%',width:'26px',height:'26px',cursor:'pointer',fontSize:'0.78rem',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
-                    <p style={{marginTop:'5px',fontSize:'0.78rem',color:'#0e8a6e',fontWeight:'700'}}>✅ {photo?.name}</p>
+                    <img src={photoPreview} alt="Photo" style={{maxWidth:'100%',maxHeight:'180px',borderRadius:'12px',border:'2px solid #9dd0b8',display:'block'}}/>
+                    <button onClick={supprimerPhoto} style={{position:'absolute',top:'8px',right:'8px',background:'#dc2626',color:'white',border:'none',borderRadius:'50%',width:'28px',height:'28px',cursor:'pointer',fontSize:'0.85rem',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:'700'}}>✕</button>
+                    <p style={{marginTop:'6px',fontSize:'0.8rem',color:'#0e8a6e',fontWeight:'700'}}>✅ {photo?.name}</p>
                   </div>
                 )}
                 <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={e => handlePhoto(e.target.files?.[0])}/>
@@ -209,10 +257,10 @@ export default function Analyse() {
               </div>
 
               {/* ÂGE + DURÉE */}
-              <div className="grille2" style={{marginBottom:'16px'}}>
-                <div className="champ">
+              <div className="g2" style={{marginBottom:'18px'}}>
+                <div>
                   <label className="label">👤 Âge</label>
-                  <select className="select" value={age} onChange={e => setAge(e.target.value)}>
+                  <select className="field field-sel" value={age} onChange={e => setAge(e.target.value)}>
                     <option value="">Non précisé</option>
                     <option value="enfant (moins de 12 ans)">Enfant (- 12 ans)</option>
                     <option value="adolescent (12-17 ans)">Adolescent</option>
@@ -222,9 +270,9 @@ export default function Analyse() {
                     <option value="senior (65 ans et plus)">Senior 65+</option>
                   </select>
                 </div>
-                <div className="champ">
+                <div>
                   <label className="label">⏱️ Depuis combien de temps ?</label>
-                  <select className="select" value={duree} onChange={e => setDuree(e.target.value)}>
+                  <select className="field field-sel" value={duree} onChange={e => setDuree(e.target.value)}>
                     <option value="">Non précisé</option>
                     <option value="quelques heures">Quelques heures</option>
                     <option value="depuis hier">Depuis hier</option>
@@ -237,98 +285,122 @@ export default function Analyse() {
               </div>
 
               {/* LOCALISATION */}
-              <div className="bloc">
-                <div className="bloc-titre" style={{color:'#1a4a7a'}}>📍 Votre localisation</div>
-                <div className="grille2">
-                  <div className="champ">
+              <div className="sec sec-bleu" style={{marginBottom:'20px'}}>
+                <div className="sec-titre st-bleu">📍 Votre localisation</div>
+                <div className="g2">
+                  <div>
                     <label className="label">📮 Code postal</label>
-                    <input className="input" type="text" placeholder="Ex: 57, 572, 57200..." value={cpInput} maxLength={5} onChange={handleCp}/>
-                    {cpLoading && <span style={{fontSize:'0.72rem',color:'#1a5c9a',marginTop:'4px'}}>🔍 Recherche en cours...</span>}
-                    {villes.length > 0 && !cpLoading && <span style={{fontSize:'0.72rem',color:'#0e8a6e',marginTop:'4px',fontWeight:'700'}}>✅ {villes.length} commune{villes.length>1?'s':''} trouvée{villes.length>1?'s':''}</span>}
-                    {cpInput.length >= 2 && villes.length === 0 && !cpLoading && <span style={{fontSize:'0.72rem',color:'#e67e22',marginTop:'4px'}}>⚠️ Aucune commune pour ce code</span>}
+                    <input className="field" type="text" placeholder="57, 572, 57200..." value={cpInput} maxLength={5} onChange={handleCp}/>
+                    {cpLoading && <p style={{fontSize:'0.72rem',color:'#1a5c9a',marginTop:'4px',fontWeight:'600'}}>🔍 Recherche...</p>}
+                    {villes.length > 0 && !cpLoading && <p style={{fontSize:'0.72rem',color:'#0e8a6e',marginTop:'4px',fontWeight:'700'}}>✅ {villes.length} commune{villes.length>1?'s':''}</p>}
+                    {cpInput.length >= 2 && villes.length === 0 && !cpLoading && <p style={{fontSize:'0.72rem',color:'#e67e22',marginTop:'4px'}}>⚠️ Aucune commune trouvée</p>}
                   </div>
-                  <div className="champ">
+                  <div>
                     <label className="label">🏙️ Ville / commune</label>
-                    <select className="select" value={ville} onChange={e => setVille(e.target.value)} disabled={villes.length === 0}>
-                      <option value="">{villes.length === 0 ? '← Entrez un code postal' : 'Sélectionnez'}</option>
+                    <select className="field field-sel" value={ville} onChange={e => setVille(e.target.value)} disabled={villes.length === 0}>
+                      <option value="">{villes.length === 0 ? '← Code postal d\'abord' : 'Sélectionnez'}</option>
                       {villes.map(v => <option key={v.nom+v.codePostal} value={v.nom}>{v.nom} — {v.codePostal}</option>)}
                     </select>
                   </div>
                 </div>
               </div>
 
-              {erreur && <div className="erreur">⚠️ {erreur}</div>}
+              {erreur && <div className="err">⚠️ {erreur}</div>}
 
-              <button className={`btn-analyser ${peutAnalyser ? 'btn-ok' : 'btn-off'}`} onClick={analyser} disabled={!peutAnalyser}>
-                {loading ? <><div className="spinner"></div>Analyse en cours...</> : <>🔍 Analyser{photo?' + photo':''}</>}
+              <button className={`btn-go ${peutAnalyser?'btn-go-on':'btn-go-off'}`} onClick={analyser} disabled={!peutAnalyser}>
+                {loading ? <><div className="spin"></div>Analyse en cours...</> : <>🔍 Analyser mes symptômes{photo?' + photo':''}</>}
               </button>
-              <p style={{textAlign:'center',marginTop:'10px',fontSize:'0.75rem',color:'#94a3b8'}}>🔒 Données non sauvegardées · ~15 secondes</p>
+              <p style={{textAlign:'center',marginTop:'10px',fontSize:'0.74rem',color:'#94a3b8'}}>🔒 Données non sauvegardées · Résultat en ~15 secondes</p>
             </div>
           )}
 
           {/* RÉSULTAT */}
           {resultat && niv && (
-            <div className="carte-res">
-              <div className="badge-niv" style={{background:niv.bg,color:niv.color,borderColor:niv.border}}>{niv.emoji} {niv.texte}</div>
-              <h2 style={{fontFamily:'Playfair Display,serif',fontSize:'1.3rem',color:'#1e293b',marginBottom:'14px'}}>Spécialiste recommandé : {resultat.specialiste}</h2>
-              <div style={{marginBottom:'14px'}}>
-                {(ville||cpInput) && <span className="badge-lieu">📍 {ville?`${ville} (${cpInput})`:cpInput}</span>}
-                {photo && <span className="badge-lieu" style={{background:'#e6f7f3',color:'#0e8a6e',borderColor:'#6fcfb2'}}>📸 Photo analysée</span>}
+            <div className="res-card">
+              <div className="badge-niv" style={{background:niv.bg,color:niv.color,borderColor:niv.border}}>
+                {niv.emoji} {niv.texte}
               </div>
-              <p style={{color:'#475569',lineHeight:'1.8',fontSize:'0.95rem'}}>{resultat.explication}</p>
+
+              <h2 className="res-titre">Spécialiste recommandé :<br/>{resultat.specialiste}</h2>
+
+              <div>
+                {(ville||cpInput) && <span className="badge-info bi-bleu">📍 {ville?`${ville} (${cpInput})`:cpInput}</span>}
+                {photo && <span className="badge-info bi-vert">📸 Photo analysée</span>}
+              </div>
+
+              <p className="res-texte">{resultat.explication}</p>
+
               {resultat.conseils?.length > 0 && (
-                <div className="bloc-conseils">
-                  <strong style={{fontSize:'0.88rem',color:'#1e293b'}}>💡 Conseils :</strong>
-                  <ul style={{marginTop:'8px',paddingLeft:'18px'}}>
-                    {resultat.conseils.map((c,i) => <li key={i} style={{color:'#475569',marginBottom:'6px',fontSize:'0.88rem'}}>{c}</li>)}
+                <div className="conseils-bloc">
+                  <div className="conseils-titre">💡 Conseils pratiques</div>
+                  <ul className="conseils-liste">
+                    {resultat.conseils.map((c,i) => <li key={i}>{c}</li>)}
                   </ul>
                 </div>
               )}
 
               {/* MÉDECINS */}
               <div className="sep">
-                <h3 className="sec-titre">🏥 {resultat.specialiste}s {ville?`à ${ville}`:cpInput?`(${cpInput})`:'près de chez vous'}</h3>
+                <h3 className="sec-h3">
+                  🏥 {resultat.specialiste}s {ville?`à ${ville}`:cpInput?`(${cpInput})`:'près de chez vous'}
+                </h3>
 
-                {medecinLoading && (
-                  <div className="loading-med">
-                    <div className="spinner-bleu"></div>
-                    Recherche dans l'annuaire officiel des médecins...
+                {medLoading && (
+                  <div className="load-box">
+                    <div className="spin-b"></div>
+                    Recherche dans l'annuaire officiel de santé...
                   </div>
                 )}
 
-                {!medecinLoading && medecins.map((m,i) => (
-                  <div className="carte-med" key={i}>
-                    <div style={{flex:1}}>
+                {!medLoading && medecins.map((m,i) => (
+                  <div className="med-card" key={i}>
+                    <div className="med-info">
                       <div className="med-nom">{m.nom}</div>
                       <div className="med-spec">🩺 {m.specialite}</div>
-                      {m.adresse && <div className="med-info">📍 {m.adresse}</div>}
-                      {m.telephone && <div className="med-info">📞 <a href={`tel:${m.telephone}`} style={{color:'#1a5c9a',fontWeight:'700',textDecoration:'none'}}>{m.telephone}</a></div>}
-                      {m.horairesTexte && <div className="med-info">🕐 {m.horairesTexte}</div>}
+                      {m.adresse && <div className="med-ligne">📍 {m.adresse}</div>}
+                      {m.telephone && <div className="med-ligne">📞 <a href={`tel:${m.telephone}`} className="med-tel">{m.telephone}</a></div>}
+                      {m.horaires && <div className="med-ligne">🕐 {m.horaires}</div>}
                       {m.teleconsultation && <span className="tag-tel">📹 Téléconsultation</span>}
                     </div>
-                    <div className="btns-rdv">
-                      <a href={`https://www.doctolib.fr/recherche?text=${encodeURIComponent(resultat.specialiste)}&location=${encodeURIComponent(ville||cpInput)}`} target="_blank" rel="noopener noreferrer" className="btn-rdv rdv-bleu">📅 RDV</a>
-                      <a href={`https://www.doctolib.fr/teleconsultation?text=${encodeURIComponent(resultat.specialiste)}`} target="_blank" rel="noopener noreferrer" className="btn-rdv rdv-vert">📹 Téléconsult.</a>
+                    <div className="med-btns">
+                      <a href={m.urlRdv || liens?.presentiel} target="_blank" rel="noopener noreferrer" className="mbtn mb-bleu">📅 Prendre RDV</a>
+                      <a href={m.urlTeleconsult || liens?.teleconsult} target="_blank" rel="noopener noreferrer" className="mbtn mb-vert">📹 Téléconsult.</a>
                     </div>
                   </div>
                 ))}
 
-                {!medecinLoading && medecins.length === 0 && (
-                  <div className="fallback">
-                    <p style={{color:'#475569',fontSize:'0.88rem',fontWeight:'600'}}>Trouvez un(e) {resultat.specialiste} {ville?`à ${ville}`:''} sur :</p>
-                    <div className="btns-plat">
-                      <a href={liensRdv?.doctolib||`https://www.doctolib.fr/recherche?text=${encodeURIComponent(resultat.specialiste)}&location=${encodeURIComponent(ville||cpInput)}`} target="_blank" rel="noopener noreferrer" className="btn-plat" style={{background:'#0596DE',color:'white'}}>📅 Doctolib</a>
-                      <a href={`https://www.doctolib.fr/teleconsultation?text=${encodeURIComponent(resultat.specialiste)}`} target="_blank" rel="noopener noreferrer" className="btn-plat" style={{background:'#0e8a6e',color:'white'}}>📹 Téléconsultation</a>
-                      <a href={liensRdv?.keldoc||`https://www.keldoc.com/search?speciality=${encodeURIComponent(resultat.specialiste)}&location=${encodeURIComponent(ville||cpInput)}`} target="_blank" rel="noopener noreferrer" className="btn-plat" style={{background:'#6366f1',color:'white'}}>📅 Keldoc</a>
+                {/* FALLBACK avec vrais liens */}
+                {!medLoading && (
+                  <div className="fallback-box" style={{marginTop: medecins.length > 0 ? '16px' : '0'}}>
+                    <div className="fallback-titre">
+                      {medecins.length > 0 ? '🔗 Voir plus de praticiens' : `Trouver un(e) ${resultat.specialiste}`}
+                    </div>
+                    <div className="fallback-sub">
+                      {ville ? `À ${ville} et ses environs` : 'Sélectionnez votre ville pour des résultats personnalisés'}
+                    </div>
+                    <div className="lien-grid">
+                      <a href={liens?.presentiel || '#'} target="_blank" rel="noopener noreferrer" className="lien-btn lb-doctolib">
+                        <span>🏥</span>Doctolib<br/><small style={{fontWeight:'400',fontSize:'0.72rem',opacity:0.85}}>RDV en cabinet</small>
+                      </a>
+                      <a href={liens?.teleconsult || '#'} target="_blank" rel="noopener noreferrer" className="lien-btn lb-teleconsult">
+                        <span>📹</span>Téléconsultation<br/><small style={{fontWeight:'400',fontSize:'0.72rem',opacity:0.85}}>Sans se déplacer</small>
+                      </a>
+                      <a href={liens?.keldoc || '#'} target="_blank" rel="noopener noreferrer" className="lien-btn lb-keldoc">
+                        <span>📅</span>Keldoc<br/><small style={{fontWeight:'400',fontSize:'0.72rem',opacity:0.85}}>Alternative Doctolib</small>
+                      </a>
+                      <a href={liens?.maiia || '#'} target="_blank" rel="noopener noreferrer" className="lien-btn lb-maiia">
+                        <span>📋</span>Maiia<br/><small style={{fontWeight:'400',fontSize:'0.72rem',opacity:0.85}}>RDV médecin</small>
+                      </a>
                     </div>
                   </div>
                 )}
-
-                {!cpInput && <div style={{background:'#fff7ed',border:'2px solid #fed7aa',borderRadius:'12px',padding:'14px',textAlign:'center',fontSize:'0.85rem',color:'#9a3412'}}>💡 Renseignez votre code postal pour voir les médecins près de chez vous</div>}
               </div>
 
-              <div className="mention">⚕️ <strong>Important :</strong> Cette analyse est informative, elle ne remplace pas un diagnostic médical. En cas d'urgence : <strong>15 (SAMU)</strong> ou <strong>112</strong>.</div>
-              <button className="btn-nouv" onClick={reset}>← Nouvelle analyse</button>
+              <div className="mention">
+                ⚕️ <strong>Important :</strong> Cette analyse est fournie à titre informatif uniquement — elle ne remplace pas un diagnostic médical. En cas d'urgence vitale : <strong>15 (SAMU)</strong> ou <strong>112</strong>.
+              </div>
+
+              <button className="btn-new" onClick={reset}>← Nouvelle analyse</button>
             </div>
           )}
         </div>
