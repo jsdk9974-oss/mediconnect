@@ -3,95 +3,54 @@
 import { useState, useRef, useCallback } from 'react'
 import Link from 'next/link'
 
-const NIVEAUX_URGENCE = {
-  1: { classe: 'urgence-1', emoji: '🚨', texte: 'Urgences maintenant' },
-  2: { classe: 'urgence-2', emoji: '⚠️', texte: 'Consulter sous 24h' },
-  3: { classe: 'urgence-3', emoji: '📅', texte: 'Consulter dans la semaine' },
-  4: { classe: 'urgence-4', emoji: '✅', texte: 'Non urgent' },
-}
-
-const s = {
-  carte: {
-    background: 'white', borderRadius: '16px', padding: '32px',
-    marginBottom: '24px', border: '2px solid #c5d8ee',
-    boxShadow: '0 4px 24px rgba(26,92,154,0.10)',
-  },
-  section: {
-    background: '#eef4fc', border: '2px solid #b8ccdd',
-    borderRadius: '12px', padding: '20px', marginBottom: '20px',
-  },
-  titreSec: {
-    fontSize: '0.9rem', fontWeight: '700', color: '#1a5c9a',
-    marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px',
-  },
-  label: {
-    display: 'block', fontWeight: '700', marginBottom: '8px',
-    color: '#1e293b', fontSize: '0.92rem',
-  },
-  input: {
-    width: '100%', padding: '13px 16px',
-    border: '2px solid #b8ccdd', borderRadius: '10px',
-    fontFamily: 'DM Sans, sans-serif', fontSize: '0.95rem',
-    color: '#1e293b', background: '#f8fbff', outline: 'none',
-  },
-  select: {
-    width: '100%', padding: '13px 16px',
-    border: '2px solid #b8ccdd', borderRadius: '10px',
-    fontFamily: 'DM Sans, sans-serif', fontSize: '0.95rem',
-    color: '#1e293b', background: '#f8fbff', cursor: 'pointer',
-    appearance: 'none',
-    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231a5c9a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")`,
-    backgroundRepeat: 'no-repeat', backgroundPosition: 'right 14px center',
-  },
+const NIVEAUX = {
+  1: { bg:'#fee2e2', color:'#991b1b', border:'#fca5a5', emoji:'🚨', texte:'Urgences maintenant' },
+  2: { bg:'#ffedd5', color:'#9a3412', border:'#fdba74', emoji:'⚠️', texte:'Consulter sous 24h' },
+  3: { bg:'#fef9c3', color:'#854d0e', border:'#fde047', emoji:'📅', texte:'Consulter cette semaine' },
+  4: { bg:'#dcfce7', color:'#166534', border:'#86efac', emoji:'✅', texte:'Non urgent' },
 }
 
 export default function Analyse() {
   const [symptomes, setSymptomes] = useState('')
   const [age, setAge] = useState('')
   const [duree, setDuree] = useState('')
-  const [codePostal, setCodePostal] = useState('')
-  const [villesDisponibles, setVillesDisponibles] = useState([])
+  const [cpInput, setCpInput] = useState('')
+  const [villes, setVilles] = useState([])
   const [ville, setVille] = useState('')
-  const [chargementVilles, setChargementVilles] = useState(false)
+  const [cpLoading, setCpLoading] = useState(false)
   const [photo, setPhoto] = useState(null)
   const [photoPreview, setPhotoPreview] = useState(null)
-  const [chargement, setChargement] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [resultat, setResultat] = useState(null)
   const [medecins, setMedecins] = useState([])
-  const [chargementMedecins, setChargementMedecins] = useState(false)
-  const [fallbackUrl, setFallbackUrl] = useState(null)
+  const [liensRdv, setLiensRdv] = useState(null)
+  const [medecinLoading, setMedecinLoading] = useState(false)
   const [erreur, setErreur] = useState(null)
   const fileRef = useRef(null)
   const cameraRef = useRef(null)
 
   const rechercherVilles = useCallback(async (cp) => {
-    setVille('')
-    setVillesDisponibles([])
+    setVille(''); setVilles([])
     if (cp.length < 2) return
-    setChargementVilles(true)
+    setCpLoading(true)
     try {
-      const res = await fetch(`https://geo.api.gouv.fr/communes?codePostal=${cp}&fields=nom,codePostal&format=json`)
-      if (res.ok) {
-        const data = await res.json()
-        setVillesDisponibles(data.sort((a, b) => a.nom.localeCompare(b.nom)))
-      }
+      const r = await fetch(`https://geo.api.gouv.fr/communes?codePostal=${cp}&fields=nom,codePostal&format=json`)
+      if (r.ok) setVilles((await r.json()).sort((a,b) => a.nom.localeCompare(b.nom)))
     } catch {}
-    finally { setChargementVilles(false) }
+    setCpLoading(false)
   }, [])
 
-  const handleCP = (e) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 5)
-    setCodePostal(val)
-    if (val.length >= 2) rechercherVilles(val)
-    else { setVillesDisponibles([]); setVille('') }
+  const handleCp = e => {
+    const v = e.target.value.replace(/\D/g,'').slice(0,5)
+    setCpInput(v); rechercherVilles(v)
   }
 
-  const handlePhoto = (file) => {
+  const handlePhoto = file => {
     if (!file) return
     setPhoto(file)
-    const reader = new FileReader()
-    reader.onload = e => setPhotoPreview(e.target.result)
-    reader.readAsDataURL(file)
+    const r = new FileReader()
+    r.onload = e => setPhotoPreview(e.target.result)
+    r.readAsDataURL(file)
   }
 
   const supprimerPhoto = () => {
@@ -100,144 +59,149 @@ export default function Analyse() {
     if (cameraRef.current) cameraRef.current.value = ''
   }
 
-  const rechercherMedecins = async (specialiste, cp, v) => {
+  const chercherMedecins = async (specialiste, cp) => {
     if (!cp) return
-    setChargementMedecins(true)
-    setMedecins([])
-    setFallbackUrl(null)
+    setMedecinLoading(true)
     try {
-      const params = new URLSearchParams({ specialiste, codePostal: cp, ville: v || '' })
-      const res = await fetch(`/api/medecins?${params}`)
-      const data = await res.json()
-      if (data.succes && data.medecins?.length > 0) {
-        setMedecins(data.medecins)
-      } else if (data.fallback) {
-        setFallbackUrl(data.urlDoctolib)
-      }
+      const r = await fetch(`/api/medecins?specialiste=${encodeURIComponent(specialiste)}&codePostal=${cp}`)
+      const d = await r.json()
+      if (d.succes && d.medecins?.length > 0) setMedecins(d.medecins)
+      else setLiensRdv(d.liens || null)
     } catch {}
-    finally { setChargementMedecins(false) }
+    setMedecinLoading(false)
   }
 
   const analyser = async () => {
-    if (symptomes.trim().length < 3 && !photo) {
-      setErreur('Veuillez décrire vos symptômes ou ajouter une photo.')
-      return
-    }
-    setChargement(true); setErreur(null); setResultat(null); setMedecins([])
-
+    if (symptomes.trim().length < 3 && !photo) { setErreur('Décrivez vos symptômes ou ajoutez une photo.'); return }
+    setLoading(true); setErreur(null); setResultat(null); setMedecins([]); setLiensRdv(null)
     try {
       let photoBase64 = null
       if (photo) {
-        photoBase64 = await new Promise((res, rej) => {
-          const reader = new FileReader()
-          reader.onload = e => res(e.target.result.split(',')[1])
-          reader.onerror = rej
-          reader.readAsDataURL(photo)
+        photoBase64 = await new Promise((res,rej) => {
+          const r = new FileReader()
+          r.onload = e => res(e.target.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(photo)
         })
       }
-
-      const reponse = await fetch('/api/analyser', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symptomes, age, duree, ville, codePostal, photoBase64, photoType: photo?.type })
+      const resp = await fetch('/api/analyser', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ symptomes, age, duree, ville, codePostal:cpInput, photoBase64, photoType:photo?.type })
       })
-      const donnees = await reponse.json()
-
-      if (donnees.error) {
-        setErreur(donnees.error)
-      } else {
-        setResultat(donnees.resultat)
-        // Lancer la recherche de médecins en parallèle
-        if (codePostal) {
-          rechercherMedecins(donnees.resultat.specialiste, codePostal, ville)
-        }
-      }
-    } catch {
-      setErreur("Une erreur s'est produite. Vérifiez votre connexion.")
-    } finally {
-      setChargement(false)
-    }
+      const d = await resp.json()
+      if (d.error) setErreur(d.error)
+      else { setResultat(d.resultat); chercherMedecins(d.resultat.specialiste, cpInput) }
+    } catch { setErreur("Erreur de connexion. Réessayez.") }
+    setLoading(false)
   }
 
-  const peutAnalyser = !chargement && (symptomes.trim().length >= 3 || photo)
-  const niveau = resultat ? NIVEAUX_URGENCE[resultat.niveau_urgence] || NIVEAUX_URGENCE[3] : null
+  const reset = () => { setResultat(null); setSymptomes(''); setAge(''); setDuree(''); setMedecins([]); setLiensRdv(null); supprimerPhoto() }
+  const peutAnalyser = !loading && (symptomes.trim().length >= 3 || photo)
+  const niv = resultat ? NIVEAUX[resultat.niveau_urgence] || NIVEAUX[3] : null
+
+  const css = `
+    .page { padding: 90px 5% 60px; min-height:100vh; background:#eef2f7; font-family:'DM Sans',sans-serif; }
+    .conteneur { max-width:740px; margin:0 auto; }
+    .titre { text-align:center; margin-bottom:28px; }
+    .titre h1 { font-family:'Playfair Display',serif; font-size:clamp(1.7rem,4vw,2.3rem); color:#1e293b; margin-bottom:8px; }
+    .titre p { color:#64748b; font-size:0.97rem; }
+    .carte { background:white; border-radius:18px; border:2.5px solid #bfcfe0; box-shadow:0 6px 28px rgba(15,40,80,0.11); padding:28px; margin-bottom:20px; }
+    .bloc { background:#e9f0f9; border:2px solid #b0c4d8; border-radius:14px; padding:18px; margin-bottom:16px; }
+    .bloc-vert { background:#e6f5ef; border:2px solid #9acdb9; border-radius:14px; padding:18px; margin-bottom:16px; }
+    .bloc-titre { font-size:0.8rem; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; margin-bottom:12px; }
+    .label { display:block; font-weight:700; font-size:0.83rem; color:#334155; margin-bottom:5px; }
+    .input { width:100%; padding:12px 14px; border:2px solid #8faec7; border-radius:10px; font-family:'DM Sans',sans-serif; font-size:0.93rem; color:#1e293b; background:white; outline:none; transition:border-color 0.2s; }
+    .input:focus { border-color:#1a5c9a; }
+    .select { width:100%; padding:12px 14px; border:2px solid #8faec7; border-radius:10px; font-family:'DM Sans',sans-serif; font-size:0.93rem; color:#1e293b; background:white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231a5c9a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center; appearance:none; cursor:pointer; outline:none; }
+    .select:focus { border-color:#1a5c9a; }
+    .select:disabled { opacity:0.4; cursor:not-allowed; }
+    .grille2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    @media(max-width:560px){.grille2{grid-template-columns:1fr;}}
+    .champ { display:flex; flex-direction:column; }
+    .photo-btns { display:flex; gap:12px; flex-wrap:wrap; }
+    .photo-btn { flex:1; min-width:130px; background:white; border-radius:12px; padding:14px 10px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:6px; font-weight:700; font-size:0.83rem; font-family:'DM Sans',sans-serif; transition:transform 0.15s; }
+    .photo-btn:hover { transform:translateY(-2px); }
+    .photo-btn-bleu { border:2px solid #1a5c9a; color:#1a5c9a; }
+    .photo-btn-vert { border:2px solid #0e8a6e; color:#0e8a6e; }
+    .btn-analyser { width:100%; padding:17px; border-radius:50px; border:none; font-family:'DM Sans',sans-serif; font-size:1rem; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.25s; }
+    .btn-ok { background:linear-gradient(135deg,#1a5c9a,#1e7bc4); color:white; box-shadow:0 5px 24px rgba(26,92,154,0.35); }
+    .btn-ok:hover { transform:translateY(-2px); box-shadow:0 8px 30px rgba(26,92,154,0.42); }
+    .btn-off { background:#cbd5e1; color:#94a3b8; cursor:not-allowed; }
+    .spinner { width:22px; height:22px; border:3px solid rgba(255,255,255,0.3); border-top-color:white; border-radius:50%; animation:spin 0.7s linear infinite; }
+    .spinner-bleu { width:22px; height:22px; border:3px solid #c3d2e8; border-top-color:#1a5c9a; border-radius:50%; animation:spin 0.7s linear infinite; flex-shrink:0; }
+    @keyframes spin { to{transform:rotate(360deg);} }
+    .erreur { background:#fee2e2; border:2px solid #fca5a5; color:#991b1b; padding:12px 16px; border-radius:10px; margin-bottom:16px; font-size:0.88rem; }
+    .carte-res { background:white; border-radius:18px; border:2.5px solid #bfcfe0; border-left:6px solid #1a5c9a; box-shadow:0 6px 28px rgba(15,40,80,0.11); padding:28px; animation:app 0.4s ease; }
+    @keyframes app { from{opacity:0;transform:translateY(16px);} to{opacity:1;transform:translateY(0);} }
+    .badge-niv { display:inline-flex; align-items:center; gap:8px; padding:8px 18px; border-radius:50px; font-weight:800; font-size:0.85rem; margin-bottom:16px; border:2px solid; }
+    .badge-lieu { display:inline-flex; align-items:center; gap:5px; background:#e8f0fa; color:#1a5c9a; border:1.5px solid #93b4d8; padding:4px 12px; border-radius:50px; font-size:0.78rem; font-weight:700; margin-bottom:12px; margin-right:6px; }
+    .bloc-conseils { background:#f0f6ff; border:2px solid #b8ccdd; border-radius:12px; padding:16px; margin-top:16px; }
+    .sep { margin-top:24px; padding-top:22px; border-top:2px solid #e2e8f0; }
+    .sec-titre { font-family:'Playfair Display',serif; font-size:1.1rem; color:#1e293b; margin-bottom:14px; }
+    .carte-med { background:#f4f8fd; border:2px solid #b8ccdd; border-radius:14px; padding:15px 16px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+    .med-nom { font-weight:800; color:#1e293b; font-size:0.93rem; margin-bottom:3px; }
+    .med-spec { color:#1a5c9a; font-size:0.8rem; font-weight:700; margin-bottom:4px; }
+    .med-info { color:#64748b; font-size:0.79rem; margin-bottom:2px; display:flex; align-items:center; gap:4px; }
+    .btns-rdv { display:flex; flex-direction:column; gap:7px; min-width:108px; }
+    .btn-rdv { padding:8px 12px; border-radius:50px; font-size:0.76rem; font-weight:700; text-align:center; cursor:pointer; text-decoration:none; display:block; white-space:nowrap; font-family:'DM Sans',sans-serif; transition:all 0.2s; border:none; }
+    .rdv-bleu { background:#1a5c9a; color:white; }
+    .rdv-vert { background:#0e8a6e; color:white; }
+    .rdv-bleu:hover { background:#1568b0; }
+    .rdv-vert:hover { background:#0a7560; }
+    .fallback { background:#f1f5fb; border:2px solid #b8ccdd; border-radius:14px; padding:20px; text-align:center; }
+    .btns-plat { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:14px; }
+    .btn-plat { padding:11px 20px; border-radius:50px; font-weight:700; font-size:0.85rem; text-decoration:none; display:inline-block; transition:transform 0.2s; }
+    .btn-plat:hover { transform:translateY(-2px); }
+    .mention { background:#fff7ed; border:2px solid #fed7aa; border-radius:12px; padding:14px 16px; font-size:0.8rem; color:#9a3412; margin-top:18px; line-height:1.6; }
+    .btn-nouv { background:transparent; border:2px solid #1a5c9a; color:#1a5c9a; padding:11px 26px; border-radius:50px; cursor:pointer; margin-top:16px; font-weight:700; font-family:'DM Sans',sans-serif; font-size:0.88rem; transition:all 0.2s; }
+    .btn-nouv:hover { background:#e8f0fa; }
+    .tag-tel { display:inline-flex; align-items:center; gap:4px; background:#e0f2fe; color:#0369a1; border:1.5px solid #7dd3fc; padding:2px 9px; border-radius:50px; font-size:0.7rem; font-weight:700; margin-top:4px; }
+    .loading-med { display:flex; align-items:center; gap:12px; background:#eef2f7; border:2px solid #b8ccdd; border-radius:12px; padding:16px 18px; color:#1a5c9a; font-size:0.88rem; font-weight:600; }
+  `
 
   return (
     <>
+      <style>{css}</style>
       <nav className="nav">
-        <Link href="/" className="nav-logo">
-          Medi<span style={{color:'#0e8a6e'}}>Connect</span>
-        </Link>
-        <Link href="/">
-          <button className="nav-btn" style={{background:'transparent',color:'#1a5c9a',border:'2px solid #1a5c9a'}}>
-            ← Accueil
-          </button>
-        </Link>
+        <Link href="/" className="nav-logo">Medi<span style={{color:'#0e8a6e'}}>Connect</span></Link>
+        <Link href="/"><button className="nav-btn" style={{background:'transparent',color:'#1a5c9a',border:'2px solid #1a5c9a'}}>← Accueil</button></Link>
       </nav>
 
-      <div className="page-analyse" style={{marginTop:'70px'}}>
-        <div className="analyse-conteneur">
-          <div className="analyse-titre">
+      <div className="page">
+        <div className="conteneur">
+          <div className="titre">
             <h1>Analysez vos symptômes</h1>
-            <p>Décrivez ce que vous ressentez — notre IA vous oriente et trouve les médecins près de chez vous</p>
+            <p>Notre IA vous oriente et trouve les médecins disponibles près de chez vous</p>
           </div>
 
           {!resultat && (
-            <div style={s.carte}>
+            <div className="carte">
 
               {/* SYMPTÔMES */}
-              <div style={s.section}>
-                <div style={s.titreSec}>📝 Décrivez vos symptômes</div>
-                <textarea
-                  style={{...s.input, minHeight:'120px', resize:'vertical'}}
-                  placeholder="Ex : Douleur dans la poitrine depuis ce matin, difficultés à respirer, légère fièvre..."
-                  value={symptomes}
-                  onChange={e => setSymptomes(e.target.value)}
-                />
+              <div className="bloc">
+                <div className="bloc-titre" style={{color:'#1a4a7a'}}>📝 Vos symptômes</div>
+                <textarea className="input" style={{minHeight:'110px',resize:'vertical'}}
+                  placeholder="Décrivez ce que vous ressentez... Ex : douleur poitrine, fièvre, difficultés à respirer..."
+                  value={symptomes} onChange={e => setSymptomes(e.target.value)}/>
               </div>
 
               {/* PHOTO */}
-              <div style={s.section}>
-                <div style={s.titreSec}>📸 Ajouter une photo <span style={{fontWeight:'400',color:'#64748b'}}>(optionnel)</span></div>
-                <p style={{fontSize:'0.83rem',color:'#64748b',marginBottom:'12px'}}>
-                  Utile pour les lésions cutanées, plaies, boutons, herpès, eczéma...
-                </p>
+              <div className="bloc-vert">
+                <div className="bloc-titre" style={{color:'#0a6b52'}}>📸 Photo <span style={{fontWeight:'400',textTransform:'none',fontSize:'0.78rem',color:'#64748b'}}>(optionnel — utile pour lésions, plaies, boutons...)</span></div>
                 {!photoPreview ? (
-                  <div style={{display:'flex', gap:'12px', flexWrap:'wrap'}}>
-                    {[
-                      { ref: fileRef, capture: undefined, emoji: '🖼️', label: 'Choisir une photo', sub: 'depuis la galerie', color: '#1a5c9a' },
-                      { ref: cameraRef, capture: 'environment', emoji: '📷', label: 'Prendre une photo', sub: 'avec l\'appareil photo', color: '#0e8a6e' },
-                    ].map((btn, i) => (
-                      <button key={i} onClick={() => btn.ref.current?.click()} style={{
-                        flex:1, minWidth:'130px', background:'white',
-                        border:`2px solid ${btn.color}`, borderRadius:'10px',
-                        padding:'14px 10px', cursor:'pointer',
-                        display:'flex', flexDirection:'column', alignItems:'center', gap:'6px',
-                        color: btn.color, fontWeight:'600', fontSize:'0.88rem',
-                        fontFamily:'DM Sans, sans-serif',
-                      }}>
-                        <span style={{fontSize:'1.8rem'}}>{btn.emoji}</span>
-                        {btn.label}
-                        <span style={{fontSize:'0.75rem', color:'#94a3b8', fontWeight:'400'}}>{btn.sub}</span>
-                      </button>
-                    ))}
+                  <div className="photo-btns">
+                    <button className="photo-btn photo-btn-bleu" onClick={() => fileRef.current?.click()}>
+                      <span style={{fontSize:'1.6rem'}}>🖼️</span>Depuis la galerie
+                      <span style={{fontSize:'0.7rem',color:'#94a3b8',fontWeight:'400'}}>Choisir un fichier</span>
+                    </button>
+                    <button className="photo-btn photo-btn-vert" onClick={() => cameraRef.current?.click()}>
+                      <span style={{fontSize:'1.6rem'}}>📷</span>Prendre une photo
+                      <span style={{fontSize:'0.7rem',color:'#94a3b8',fontWeight:'400'}}>Appareil photo</span>
+                    </button>
                   </div>
                 ) : (
-                  <div style={{position:'relative', display:'inline-block'}}>
-                    <img src={photoPreview} alt="Photo ajoutée" style={{
-                      maxWidth:'100%', maxHeight:'200px',
-                      borderRadius:'10px', border:'2px solid #b8ccdd', display:'block'
-                    }}/>
-                    <button onClick={supprimerPhoto} style={{
-                      position:'absolute', top:'6px', right:'6px',
-                      background:'#c0392b', color:'white', border:'none',
-                      borderRadius:'50%', width:'28px', height:'28px',
-                      cursor:'pointer', fontSize:'0.85rem', display:'flex',
-                      alignItems:'center', justifyContent:'center',
-                    }}>✕</button>
-                    <p style={{marginTop:'6px', fontSize:'0.82rem', color:'#0e8a6e', fontWeight:'600'}}>
-                      ✅ {photo?.name}
-                    </p>
+                  <div style={{position:'relative',display:'inline-block'}}>
+                    <img src={photoPreview} alt="Photo" style={{maxWidth:'100%',maxHeight:'170px',borderRadius:'10px',border:'2px solid #9acdb9',display:'block'}}/>
+                    <button onClick={supprimerPhoto} style={{position:'absolute',top:'6px',right:'6px',background:'#dc2626',color:'white',border:'none',borderRadius:'50%',width:'26px',height:'26px',cursor:'pointer',fontSize:'0.78rem',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+                    <p style={{marginTop:'5px',fontSize:'0.78rem',color:'#0e8a6e',fontWeight:'700'}}>✅ {photo?.name}</p>
                   </div>
                 )}
                 <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={e => handlePhoto(e.target.files?.[0])}/>
@@ -245,10 +209,10 @@ export default function Analyse() {
               </div>
 
               {/* ÂGE + DURÉE */}
-              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'16px', marginBottom:'20px'}}>
-                <div>
-                  <label style={s.label}>👤 Âge (optionnel)</label>
-                  <select style={s.select} value={age} onChange={e => setAge(e.target.value)}>
+              <div className="grille2" style={{marginBottom:'16px'}}>
+                <div className="champ">
+                  <label className="label">👤 Âge</label>
+                  <select className="select" value={age} onChange={e => setAge(e.target.value)}>
                     <option value="">Non précisé</option>
                     <option value="enfant (moins de 12 ans)">Enfant (- 12 ans)</option>
                     <option value="adolescent (12-17 ans)">Adolescent</option>
@@ -258,9 +222,9 @@ export default function Analyse() {
                     <option value="senior (65 ans et plus)">Senior 65+</option>
                   </select>
                 </div>
-                <div>
-                  <label style={s.label}>⏱️ Depuis combien de temps ?</label>
-                  <select style={s.select} value={duree} onChange={e => setDuree(e.target.value)}>
+                <div className="champ">
+                  <label className="label">⏱️ Depuis combien de temps ?</label>
+                  <select className="select" value={duree} onChange={e => setDuree(e.target.value)}>
                     <option value="">Non précisé</option>
                     <option value="quelques heures">Quelques heures</option>
                     <option value="depuis hier">Depuis hier</option>
@@ -273,202 +237,98 @@ export default function Analyse() {
               </div>
 
               {/* LOCALISATION */}
-              <div style={s.section}>
-                <div style={s.titreSec}>📍 Votre localisation — pour trouver des médecins près de chez vous</div>
-                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'16px'}}>
-                  <div>
-                    <label style={s.label}>📮 Code postal</label>
-                    <input
-                      type="text" style={s.input}
-                      placeholder="Ex : 57, 572, 57200..."
-                      value={codePostal} maxLength={5}
-                      onChange={handleCP}
-                    />
-                    {chargementVilles && <p style={{fontSize:'0.78rem',color:'#1a5c9a',marginTop:'5px'}}>🔍 Recherche...</p>}
-                    {villesDisponibles.length > 0 && !chargementVilles && (
-                      <p style={{fontSize:'0.78rem',color:'#0e8a6e',marginTop:'5px',fontWeight:'600'}}>
-                        ✅ {villesDisponibles.length} ville{villesDisponibles.length > 1 ? 's' : ''} trouvée{villesDisponibles.length > 1 ? 's' : ''}
-                      </p>
-                    )}
+              <div className="bloc">
+                <div className="bloc-titre" style={{color:'#1a4a7a'}}>📍 Votre localisation</div>
+                <div className="grille2">
+                  <div className="champ">
+                    <label className="label">📮 Code postal</label>
+                    <input className="input" type="text" placeholder="Ex: 57, 572, 57200..." value={cpInput} maxLength={5} onChange={handleCp}/>
+                    {cpLoading && <span style={{fontSize:'0.72rem',color:'#1a5c9a',marginTop:'4px'}}>🔍 Recherche en cours...</span>}
+                    {villes.length > 0 && !cpLoading && <span style={{fontSize:'0.72rem',color:'#0e8a6e',marginTop:'4px',fontWeight:'700'}}>✅ {villes.length} commune{villes.length>1?'s':''} trouvée{villes.length>1?'s':''}</span>}
+                    {cpInput.length >= 2 && villes.length === 0 && !cpLoading && <span style={{fontSize:'0.72rem',color:'#e67e22',marginTop:'4px'}}>⚠️ Aucune commune pour ce code</span>}
                   </div>
-                  <div>
-                    <label style={s.label}>🏙️ Votre ville</label>
-                    <select
-                      style={{...s.select, opacity: villesDisponibles.length === 0 ? 0.5 : 1}}
-                      value={ville}
-                      onChange={e => setVille(e.target.value)}
-                      disabled={villesDisponibles.length === 0}
-                    >
-                      <option value="">{villesDisponibles.length === 0 ? 'Entrez un code postal' : 'Sélectionnez'}</option>
-                      {villesDisponibles.map(v => (
-                        <option key={v.nom} value={v.nom}>{v.nom} ({v.codePostal})</option>
-                      ))}
+                  <div className="champ">
+                    <label className="label">🏙️ Ville / commune</label>
+                    <select className="select" value={ville} onChange={e => setVille(e.target.value)} disabled={villes.length === 0}>
+                      <option value="">{villes.length === 0 ? '← Entrez un code postal' : 'Sélectionnez'}</option>
+                      {villes.map(v => <option key={v.nom+v.codePostal} value={v.nom}>{v.nom} — {v.codePostal}</option>)}
                     </select>
                   </div>
                 </div>
               </div>
 
-              {erreur && (
-                <div style={{background:'#fee2e2',color:'#991b1b',border:'2px solid #fca5a5',padding:'12px 16px',borderRadius:'10px',marginBottom:'16px',fontSize:'0.9rem'}}>
-                  ⚠️ {erreur}
-                </div>
-              )}
+              {erreur && <div className="erreur">⚠️ {erreur}</div>}
 
-              <button onClick={analyser} disabled={!peutAnalyser} style={{
-                width:'100%',
-                background: peutAnalyser ? 'linear-gradient(135deg,#1a5c9a,#2e75b6)' : '#94a3b8',
-                color:'white', padding:'17px', borderRadius:'50px',
-                fontSize:'1rem', fontWeight:'700',
-                cursor: peutAnalyser ? 'pointer' : 'not-allowed',
-                border:'none', fontFamily:'DM Sans, sans-serif',
-                display:'flex', alignItems:'center', justifyContent:'center', gap:'10px',
-                boxShadow: peutAnalyser ? '0 4px 20px rgba(26,92,154,0.3)' : 'none',
-              }}>
-                {chargement
-                  ? <><div className="spinner" style={{width:'20px',height:'20px',borderWidth:'2px'}}></div>Analyse en cours...</>
-                  : <>🔍 Analyser{photo ? ' + photo' : ''}</>
-                }
+              <button className={`btn-analyser ${peutAnalyser ? 'btn-ok' : 'btn-off'}`} onClick={analyser} disabled={!peutAnalyser}>
+                {loading ? <><div className="spinner"></div>Analyse en cours...</> : <>🔍 Analyser{photo?' + photo':''}</>}
               </button>
-              <p style={{textAlign:'center',marginTop:'12px',fontSize:'0.8rem',color:'#94a3b8'}}>
-                🔒 Données non sauvegardées · ~15 secondes
-              </p>
+              <p style={{textAlign:'center',marginTop:'10px',fontSize:'0.75rem',color:'#94a3b8'}}>🔒 Données non sauvegardées · ~15 secondes</p>
             </div>
           )}
 
           {/* RÉSULTAT */}
-          {resultat && niveau && (
-            <div style={{...s.carte, borderLeft:'6px solid #1a5c9a'}}>
-              <div className={`resultat-urgence ${niveau.classe}`}>{niveau.emoji} {niveau.texte}</div>
-
-              <h2 className="resultat-titre">Spécialiste recommandé : {resultat.specialiste}</h2>
-
-              <div style={{display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'16px'}}>
-                {(ville || codePostal) && (
-                  <span style={{background:'#e8f2ff',color:'#1a5c9a',border:'1px solid #b8ccdd',padding:'4px 12px',borderRadius:'50px',fontSize:'0.82rem',fontWeight:'600'}}>
-                    📍 {ville ? `${ville} (${codePostal})` : codePostal}
-                  </span>
-                )}
-                {photo && (
-                  <span style={{background:'#e6f7f3',color:'#0e8a6e',border:'1px solid #a7d7cc',padding:'4px 12px',borderRadius:'50px',fontSize:'0.82rem',fontWeight:'600'}}>
-                    📸 Photo analysée
-                  </span>
-                )}
+          {resultat && niv && (
+            <div className="carte-res">
+              <div className="badge-niv" style={{background:niv.bg,color:niv.color,borderColor:niv.border}}>{niv.emoji} {niv.texte}</div>
+              <h2 style={{fontFamily:'Playfair Display,serif',fontSize:'1.3rem',color:'#1e293b',marginBottom:'14px'}}>Spécialiste recommandé : {resultat.specialiste}</h2>
+              <div style={{marginBottom:'14px'}}>
+                {(ville||cpInput) && <span className="badge-lieu">📍 {ville?`${ville} (${cpInput})`:cpInput}</span>}
+                {photo && <span className="badge-lieu" style={{background:'#e6f7f3',color:'#0e8a6e',borderColor:'#6fcfb2'}}>📸 Photo analysée</span>}
               </div>
-
-              <p className="resultat-contenu">{resultat.explication}</p>
-
+              <p style={{color:'#475569',lineHeight:'1.8',fontSize:'0.95rem'}}>{resultat.explication}</p>
               {resultat.conseils?.length > 0 && (
-                <div style={{background:'#f0f7ff',border:'2px solid #c5d8ee',borderRadius:'12px',padding:'18px',marginTop:'18px'}}>
-                  <strong style={{fontSize:'0.92rem',color:'#1e293b'}}>💡 Conseils :</strong>
+                <div className="bloc-conseils">
+                  <strong style={{fontSize:'0.88rem',color:'#1e293b'}}>💡 Conseils :</strong>
                   <ul style={{marginTop:'8px',paddingLeft:'18px'}}>
-                    {resultat.conseils.map((c, i) => (
-                      <li key={i} style={{color:'#475569',marginBottom:'6px',fontSize:'0.92rem'}}>{c}</li>
-                    ))}
+                    {resultat.conseils.map((c,i) => <li key={i} style={{color:'#475569',marginBottom:'6px',fontSize:'0.88rem'}}>{c}</li>)}
                   </ul>
                 </div>
               )}
 
-              {/* SECTION MÉDECINS */}
-              <div style={{marginTop:'28px',paddingTop:'24px',borderTop:'2px solid #e2ecf7'}}>
-                <h3 style={{fontFamily:'Playfair Display,serif',fontSize:'1.15rem',color:'#1e293b',marginBottom:'16px'}}>
-                  🏥 {resultat.specialiste}s {ville ? `à ${ville}` : codePostal ? `(${codePostal})` : 'près de chez vous'}
-                </h3>
+              {/* MÉDECINS */}
+              <div className="sep">
+                <h3 className="sec-titre">🏥 {resultat.specialiste}s {ville?`à ${ville}`:cpInput?`(${cpInput})`:'près de chez vous'}</h3>
 
-                {/* Chargement médecins */}
-                {chargementMedecins && (
-                  <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'20px',background:'#f0f7ff',borderRadius:'12px'}}>
-                    <div className="spinner"></div>
-                    <span style={{color:'#1a5c9a',fontSize:'0.9rem'}}>Recherche des médecins disponibles...</span>
+                {medecinLoading && (
+                  <div className="loading-med">
+                    <div className="spinner-bleu"></div>
+                    Recherche dans l'annuaire officiel des médecins...
                   </div>
                 )}
 
-                {/* Liste médecins */}
-                {!chargementMedecins && medecins.length > 0 && (
-                  <div style={{display:'flex',flexDirection:'column',gap:'12px'}}>
-                    {medecins.map((m, i) => (
-                      <div key={i} style={{
-                        background:'white', border:'2px solid #c5d8ee',
-                        borderRadius:'12px', padding:'16px 20px',
-                        display:'flex', alignItems:'center',
-                        justifyContent:'space-between', gap:'12px',
-                      }}>
-                        <div>
-                          <p style={{fontWeight:'700',color:'#1e293b',marginBottom:'4px',fontSize:'0.95rem'}}>
-                            {m.nom}
-                          </p>
-                          <p style={{color:'#64748b',fontSize:'0.83rem'}}>
-                            🏥 {m.specialite}
-                          </p>
-                          <p style={{color:'#64748b',fontSize:'0.83rem',marginTop:'2px'}}>
-                            📍 {m.adresse}
-                          </p>
-                          {m.telephone && (
-                            <p style={{color:'#1a5c9a',fontSize:'0.83rem',marginTop:'2px',fontWeight:'600'}}>
-                              📞 {m.telephone}
-                            </p>
-                          )}
-                        </div>
-                        <a
-                          href={`https://www.doctolib.fr/recherche?text=${encodeURIComponent(resultat.specialiste)}&location=${encodeURIComponent(ville||codePostal)}`}
-                          target="_blank" rel="noopener noreferrer"
-                          style={{textDecoration:'none'}}
-                        >
-                          <div style={{
-                            background:'#1a5c9a', color:'white',
-                            padding:'9px 16px', borderRadius:'50px',
-                            fontSize:'0.82rem', fontWeight:'700',
-                            whiteSpace:'nowrap', cursor:'pointer',
-                          }}>
-                            Prendre RDV
-                          </div>
-                        </a>
-                      </div>
-                    ))}
+                {!medecinLoading && medecins.map((m,i) => (
+                  <div className="carte-med" key={i}>
+                    <div style={{flex:1}}>
+                      <div className="med-nom">{m.nom}</div>
+                      <div className="med-spec">🩺 {m.specialite}</div>
+                      {m.adresse && <div className="med-info">📍 {m.adresse}</div>}
+                      {m.telephone && <div className="med-info">📞 <a href={`tel:${m.telephone}`} style={{color:'#1a5c9a',fontWeight:'700',textDecoration:'none'}}>{m.telephone}</a></div>}
+                      {m.horairesTexte && <div className="med-info">🕐 {m.horairesTexte}</div>}
+                      {m.teleconsultation && <span className="tag-tel">📹 Téléconsultation</span>}
+                    </div>
+                    <div className="btns-rdv">
+                      <a href={`https://www.doctolib.fr/recherche?text=${encodeURIComponent(resultat.specialiste)}&location=${encodeURIComponent(ville||cpInput)}`} target="_blank" rel="noopener noreferrer" className="btn-rdv rdv-bleu">📅 RDV</a>
+                      <a href={`https://www.doctolib.fr/teleconsultation?text=${encodeURIComponent(resultat.specialiste)}`} target="_blank" rel="noopener noreferrer" className="btn-rdv rdv-vert">📹 Téléconsult.</a>
+                    </div>
                   </div>
-                )}
+                ))}
 
-                {/* Fallback si API indisponible */}
-                {!chargementMedecins && medecins.length === 0 && !fallbackUrl && codePostal && (
-                  <div style={{background:'#f0f7ff',border:'2px solid #c5d8ee',borderRadius:'12px',padding:'20px',textAlign:'center'}}>
-                    <p style={{color:'#64748b',marginBottom:'14px',fontSize:'0.9rem'}}>
-                      Recherche directe sur les plateformes de rendez-vous
-                    </p>
-                    <div style={{display:'flex',gap:'12px',justifyContent:'center',flexWrap:'wrap'}}>
-                      <a href={`https://www.doctolib.fr/recherche?text=${encodeURIComponent(resultat.specialiste)}&location=${encodeURIComponent(ville||codePostal)}`}
-                        target="_blank" rel="noopener noreferrer" style={{textDecoration:'none'}}>
-                        <div style={{background:'#0596DE',color:'white',padding:'12px 24px',borderRadius:'50px',fontWeight:'700',cursor:'pointer',fontSize:'0.9rem'}}>
-                          📅 Doctolib
-                        </div>
-                      </a>
-                      <a href={`https://www.keldoc.com/search?specialty=${encodeURIComponent(resultat.specialiste)}&city=${encodeURIComponent(ville||codePostal)}`}
-                        target="_blank" rel="noopener noreferrer" style={{textDecoration:'none'}}>
-                        <div style={{background:'#6366f1',color:'white',padding:'12px 24px',borderRadius:'50px',fontWeight:'700',cursor:'pointer',fontSize:'0.9rem'}}>
-                          📅 Keldoc
-                        </div>
-                      </a>
+                {!medecinLoading && medecins.length === 0 && (
+                  <div className="fallback">
+                    <p style={{color:'#475569',fontSize:'0.88rem',fontWeight:'600'}}>Trouvez un(e) {resultat.specialiste} {ville?`à ${ville}`:''} sur :</p>
+                    <div className="btns-plat">
+                      <a href={liensRdv?.doctolib||`https://www.doctolib.fr/recherche?text=${encodeURIComponent(resultat.specialiste)}&location=${encodeURIComponent(ville||cpInput)}`} target="_blank" rel="noopener noreferrer" className="btn-plat" style={{background:'#0596DE',color:'white'}}>📅 Doctolib</a>
+                      <a href={`https://www.doctolib.fr/teleconsultation?text=${encodeURIComponent(resultat.specialiste)}`} target="_blank" rel="noopener noreferrer" className="btn-plat" style={{background:'#0e8a6e',color:'white'}}>📹 Téléconsultation</a>
+                      <a href={liensRdv?.keldoc||`https://www.keldoc.com/search?speciality=${encodeURIComponent(resultat.specialiste)}&location=${encodeURIComponent(ville||cpInput)}`} target="_blank" rel="noopener noreferrer" className="btn-plat" style={{background:'#6366f1',color:'white'}}>📅 Keldoc</a>
                     </div>
                   </div>
                 )}
 
-                {!codePostal && (
-                  <div style={{background:'#fff7ed',border:'2px solid #fed7aa',borderRadius:'12px',padding:'16px',textAlign:'center'}}>
-                    <p style={{color:'#9a3412',fontSize:'0.88rem'}}>
-                      💡 Renseignez votre code postal pour voir les médecins près de chez vous
-                    </p>
-                  </div>
-                )}
+                {!cpInput && <div style={{background:'#fff7ed',border:'2px solid #fed7aa',borderRadius:'12px',padding:'14px',textAlign:'center',fontSize:'0.85rem',color:'#9a3412'}}>💡 Renseignez votre code postal pour voir les médecins près de chez vous</div>}
               </div>
 
-              <div style={{background:'#fff7ed',border:'2px solid #fed7aa',borderRadius:'12px',padding:'14px 18px',fontSize:'0.82rem',color:'#9a3412',marginTop:'20px',lineHeight:'1.6'}}>
-                ⚕️ <strong>Important :</strong> Cette analyse est informative, elle ne remplace pas un diagnostic médical. En cas d'urgence : <strong>15 (SAMU)</strong> ou <strong>112</strong>.
-              </div>
-
-              <button
-                onClick={() => { setResultat(null); setSymptomes(''); setAge(''); setDuree(''); setMedecins([]); supprimerPhoto() }}
-                style={{background:'transparent',border:'2px solid #1a5c9a',color:'#1a5c9a',padding:'11px 26px',borderRadius:'50px',cursor:'pointer',marginTop:'20px',fontWeight:'600',fontFamily:'DM Sans, sans-serif',fontSize:'0.92rem'}}
-              >
-                ← Nouvelle analyse
-              </button>
+              <div className="mention">⚕️ <strong>Important :</strong> Cette analyse est informative, elle ne remplace pas un diagnostic médical. En cas d'urgence : <strong>15 (SAMU)</strong> ou <strong>112</strong>.</div>
+              <button className="btn-nouv" onClick={reset}>← Nouvelle analyse</button>
             </div>
           )}
         </div>
