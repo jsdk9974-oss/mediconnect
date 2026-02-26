@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import Link from 'next/link'
 
 const NIVEAUX = {
@@ -83,9 +83,10 @@ export default function Analyse() {
   const [duree, setDuree]           = useState('')
   const [dept, setDept]             = useState('')
   const [cpInput, setCpInput]       = useState('')
-  const [communes, setCommunes]     = useState([])   // toutes les communes du département
+  const [communes, setCommunes]     = useState([])
   const [ville, setVille]           = useState('')
   const [villesLoading, setVillesLoading] = useState(false)
+  const [depts, setDepts]           = useState([])   // liste dépts chargée depuis l'API
   const [photo, setPhoto]           = useState(null)
   const [photoPreview, setPhotoPreview] = useState(null)
   const [loading, setLoading]       = useState(false)
@@ -97,53 +98,80 @@ export default function Analyse() {
   const fileRef   = useRef(null)
   const cameraRef = useRef(null)
 
-  // ─── CHARGEMENT COMMUNES ────────────────────────────────────────────────────
-  // L'API geo.gouv.fr retourne codesPostaux (tableau), pas codePostal
-  const chargerCommunes = useCallback(async (codeDept) => {
+  // ─── CHARGEMENT DÉPARTEMENTS DEPUIS L'API ────────────────────────────────────
+  const chargerDepts = useCallback(async () => {
+    try {
+      const r = await fetch('https://geo.api.gouv.fr/departements?fields=code,nom')
+      if (r.ok) {
+        const data = await r.json()
+        setDepts(data.sort((a, b) => a.code.localeCompare(b.code)))
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => { chargerDepts() }, [chargerDepts])
+
+    // ─── CHARGEMENT COMMUNES PAR DÉPARTEMENT ────────────────────────────────────
+  // Inspiré du HTML de référence : utilise l'API directement, sans liste statique
+  const chargerCommunesDept = useCallback(async (codeDept) => {
     setVille(''); setCommunes([])
     if (!codeDept) return
     setVillesLoading(true)
     try {
-      const url = `https://geo.api.gouv.fr/communes?codeDepartement=${codeDept}&fields=nom,codesPostaux&format=json&boost=population&limit=500`
-      const r = await fetch(url)
+      const r = await fetch(
+        `https://geo.api.gouv.fr/communes?codeDepartement=${codeDept}&fields=nom,code&format=json&boost=population&limit=500`
+      )
       if (r.ok) {
         const data = await r.json()
-        // Normaliser : extraire premier code postal de chaque commune
-        const normalized = data.map(c => ({
-          nom: c.nom,
-          codesPostaux: c.codesPostaux || [],
-          codePostalPrincipal: (c.codesPostaux || [])[0] || '',
-        })).sort((a, b) => a.nom.localeCompare(b.nom))
-        setCommunes(normalized)
+        setCommunes(data.sort((a, b) => a.nom.localeCompare(b.nom, 'fr')))
       }
-    } catch (e) { console.error('Geo API:', e) }
+    } catch (e) { console.error('Geo dept:', e) }
     setVillesLoading(false)
   }, [])
 
-  // ─── FILTRE PAR CODE POSTAL ─────────────────────────────────────────────────
-  // Filtre si l'utilisateur tape ≥3 chiffres dans code postal
-  const communesFiltrees = cpInput.length >= 3
-    ? communes.filter(c => c.codesPostaux.some(cp => cp.startsWith(cpInput)))
-    : communes
+  // ─── CHARGEMENT COMMUNES PAR CODE POSTAL (5 chiffres exact) ─────────────────
+  // Même logique que le HTML de référence : codePostal= → renvoie communes + département
+  const chargerCommunesCP = useCallback(async (cp) => {
+    setVille(''); setCommunes([])
+    if (cp.length !== 5) return
+    setVillesLoading(true)
+    try {
+      const r = await fetch(
+        `https://geo.api.gouv.fr/communes?codePostal=${cp}&fields=nom,code,departement&format=json`
+      )
+      if (r.ok) {
+        const data = await r.json()
+        setCommunes(data.sort((a, b) => a.nom.localeCompare(b.nom, 'fr')))
+        // Met à jour le département automatiquement
+        if (data[0]?.departement?.code) setDept(data[0].departement.code)
+        // Sélection auto si une seule commune
+        if (data.length === 1) setVille(data[0].nom)
+      }
+    } catch (e) { console.error('Geo CP:', e) }
+    setVillesLoading(false)
+  }, [])
+
+  const communesFiltrees = communes   // l'API filtre directement, pas besoin de filtre client
 
   // ─── HANDLERS ───────────────────────────────────────────────────────────────
   const handleDept = e => {
     const val = e.target.value
     setDept(val); setCpInput(''); setVille('')
-    chargerCommunes(val)
+    if (val) chargerCommunesDept(val)
+    else setCommunes([])
   }
 
   const handleCpInput = e => {
-    const val = e.target.value.replace(/\D/g,'').slice(0,5)
+    const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 5)
     setCpInput(val); setVille('')
-    // Si code postal complet sans département → deviner le département
-    if (val.length >= 2 && !dept) {
-      const deptCode = val.slice(0,2)
-      const found = DEPARTEMENTS.find(d => d.code === deptCode)
-      if (found) { setDept(deptCode); chargerCommunes(deptCode) }
+    if (val.length === 5) {
+      chargerCommunesCP(val)          // recherche exacte → communes + département auto
+    } else if (val.length === 0 && dept) {
+      chargerCommunesDept(dept)       // revenir à toutes les communes du département
+    } else {
+      setCommunes([])
     }
   }
-
   const handlePhoto = file => {
     if (!file) return
     setPhoto(file)
@@ -474,20 +502,22 @@ export default function Analyse() {
                     <div className="sec-titre st-b">📍 Votre localisation</div>
                     <div className="g3">
 
-                      {/* 1 — DÉPARTEMENT */}
+                      {/* 1 — DÉPARTEMENT chargé depuis l'API */}
                       <div>
                         <label className="label">🗺️ Département</label>
                         <select className="field field-sel" value={dept} onChange={handleDept}>
-                          <option value=""></option>
-                          {DEPARTEMENTS.map(d => (
+                          <option value="">Sélectionnez</option>
+                          {depts.map(d => (
                             <option key={d.code} value={d.code}>{d.code} — {d.nom}</option>
                           ))}
                         </select>
-                        {villesLoading && <p className="status s-load">🔍 Chargement...</p>}
-                        {!villesLoading && communes.length > 0 && <p className="status s-ok">✅ {communes.length} communes</p>}
+                        {villesLoading && !cpInput && <p className="status s-load">🔍 Chargement...</p>}
+                        {!villesLoading && communes.length > 0 && !cpInput && (
+                          <p className="status s-ok">✅ {communes.length} communes</p>
+                        )}
                       </div>
 
-                      {/* 2 — CODE POSTAL (affine la liste) */}
+                      {/* 2 — CODE POSTAL : 5 chiffres exact → recherche directe */}
                       <div>
                         <label className="label">
                           📮 Code postal
@@ -499,15 +529,16 @@ export default function Analyse() {
                           value={cpInput}
                           maxLength={5}
                           onChange={handleCpInput}
-                          disabled={!dept}
-                          placeholder={dept ? '' : ''}
+                          placeholder="Ex: 57200"
                         />
-                        {cpInput.length >= 3 && !villesLoading && (
-                          <p className={`status ${communesFiltrees.length > 0 ? 's-ok' : 's-err'}`}>
-                            {communesFiltrees.length > 0
-                              ? `✅ ${communesFiltrees.length} résultat${communesFiltrees.length > 1 ? 's' : ''}`
-                              : '⚠️ Aucun résultat'}
-                          </p>
+                        {villesLoading && cpInput.length === 5 && (
+                          <p className="status s-load">🔍 Recherche...</p>
+                        )}
+                        {!villesLoading && cpInput.length === 5 && communes.length > 0 && (
+                          <p className="status s-ok">✅ {communes.length} commune{communes.length > 1 ? 's' : ''}</p>
+                        )}
+                        {!villesLoading && cpInput.length === 5 && communes.length === 0 && (
+                          <p className="status s-err">⚠️ Code postal inconnu</p>
                         )}
                       </div>
 
@@ -518,19 +549,17 @@ export default function Analyse() {
                           className="field field-sel"
                           value={ville}
                           onChange={e => setVille(e.target.value)}
-                          disabled={communesFiltrees.length === 0}
+                          disabled={villesLoading || communes.length === 0}
                         >
-                          <option value=""></option>
-                          {communesFiltrees.map(c => (
-                            <option key={c.nom + c.codePostalPrincipal} value={c.nom}>
-                              {c.nom}{c.codePostalPrincipal ? ` (${c.codePostalPrincipal})` : ''}
-                            </option>
+                          <option value="">
+                            {villesLoading ? 'Chargement...' : communes.length === 0 ? 'Sélectionnez un département' : `Sélectionnez (${communes.length})`}
+                          </option>
+                          {communes.map(c => (
+                            <option key={c.code || c.nom} value={c.nom}>{c.nom}</option>
                           ))}
                         </select>
-                        {!villesLoading && communes.length > 0 && communesFiltrees.length > 0 && (
-                          <p className="status s-info">{communesFiltrees.length} commune{communesFiltrees.length > 1 ? 's' : ''}</p>
-                        )}
                       </div>
+
 
                     </div>
                   </div>
