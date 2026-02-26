@@ -29,20 +29,35 @@ export default function Analyse() {
   const fileRef = useRef(null)
   const cameraRef = useRef(null)
 
+  // Recherche par code postal OU par département (2 chiffres = tout le département)
   const rechercherVilles = useCallback(async (cp) => {
     setVille(''); setVilles([])
-    if (cp.length < 2) return
+    if (!cp || cp.length < 2) return
     setCpLoading(true)
     try {
-      const r = await fetch(`https://geo.api.gouv.fr/communes?codePostal=${cp}&fields=nom,codePostal&format=json`)
-      if (r.ok) setVilles((await r.json()).sort((a,b) => a.nom.localeCompare(b.nom)))
+      let url
+      if (cp.length === 2 || cp.length === 3) {
+        // Recherche par département : on prend toutes les communes du département
+        // Pour la Corse: 2A/2B → on utilise codeDepartement
+        url = `https://geo.api.gouv.fr/communes?codeDepartement=${cp}&fields=nom,codePostal&format=json&boost=population&limit=50`
+      } else {
+        // Code postal complet ou presque
+        url = `https://geo.api.gouv.fr/communes?codePostal=${cp}&fields=nom,codePostal&format=json`
+      }
+      const r = await fetch(url)
+      if (r.ok) {
+        const data = await r.json()
+        setVilles(data.sort((a,b) => a.nom.localeCompare(b.nom)))
+      }
     } catch {}
     setCpLoading(false)
   }, [])
 
   const handleCp = e => {
     const v = e.target.value.replace(/\D/g,'').slice(0,5)
-    setCpInput(v); rechercherVilles(v)
+    setCpInput(v)
+    if (v.length >= 2) rechercherVilles(v)
+    else { setVilles([]); setVille('') }
   }
 
   const handlePhoto = file => {
@@ -60,10 +75,9 @@ export default function Analyse() {
   }
 
   const chercherMedecins = async (specialiste, cp, v) => {
-    if (!cp && !v) return
     setMedLoading(true)
     try {
-      const r = await fetch(`/api/medecins?specialiste=${encodeURIComponent(specialiste)}&codePostal=${cp}&ville=${encodeURIComponent(v)}`)
+      const r = await fetch(`/api/medecins?specialiste=${encodeURIComponent(specialiste)}&codePostal=${cp}&ville=${encodeURIComponent(v||'')}`)
       const d = await r.json()
       setMedecins(d.medecins || [])
       setLiens(d.liens || null)
@@ -76,8 +90,13 @@ export default function Analyse() {
     setLoading(true); setErreur(null); setResultat(null); setMedecins([]); setLiens(null)
     try {
       let photoBase64 = null
-      if (photo) photoBase64 = await new Promise((res,rej) => { const r = new FileReader(); r.onload = e => res(e.target.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(photo) })
-      const resp = await fetch('/api/analyser', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symptomes,age,duree,ville,codePostal:cpInput,photoBase64,photoType:photo?.type}) })
+      if (photo) photoBase64 = await new Promise((res,rej) => {
+        const r = new FileReader(); r.onload = e => res(e.target.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(photo)
+      })
+      const resp = await fetch('/api/analyser', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({symptomes,age,duree,ville,codePostal:cpInput,photoBase64,photoType:photo?.type})
+      })
       const d = await resp.json()
       if (d.error) setErreur(d.error)
       else { setResultat(d.resultat); chercherMedecins(d.resultat.specialiste, cpInput, ville) }
@@ -85,324 +104,351 @@ export default function Analyse() {
     setLoading(false)
   }
 
-  const reset = () => { setResultat(null); setSymptomes(''); setAge(''); setDuree(''); setMedecins([]); setLiens(null); supprimerPhoto() }
+  const reset = () => {
+    setResultat(null); setSymptomes(''); setAge(''); setDuree('')
+    setMedecins([]); setLiens(null); supprimerPhoto()
+  }
   const peutAnalyser = !loading && (symptomes.trim().length >= 3 || photo)
   const niv = resultat ? NIVEAUX[resultat.niveau_urgence] || NIVEAUX[3] : null
 
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600;700;800&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        .pg { min-height:100vh; background: linear-gradient(160deg, #0f2942 0%, #1a4870 40%, #1a5c9a 100%); padding: 80px 16px 60px; font-family: 'DM Sans', sans-serif; }
-        .ctn { max-width: 680px; margin: 0 auto; }
+        body { font-family: 'DM Sans', sans-serif; background: #060e1a; }
+
+        /* BANDES BG (même style accueil) */
+        .bg-bands {
+          position: fixed; inset: 0; z-index: 0; overflow: hidden;
+        }
+        .band { position: absolute; left: -20%; width: 140%; transform-origin: left center; }
+        .b1 { top: -10%; height: 45vh; background: linear-gradient(90deg,#0a1f3d,#0d2a52 60%,#0a4a6e); transform: rotate(-6deg); }
+        .b2 { top: 32%; height: 20vh; background: linear-gradient(90deg,#071628,#0f3460 50%,#1a5c9a); transform: rotate(-6deg); opacity:0.7; }
+        .b3 { top: 52%; height: 60vh; background: #060e1a; transform: rotate(-6deg); }
+        .grid-ov { position: fixed; inset: 0; z-index: 1; background-image: linear-gradient(rgba(26,92,154,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(26,92,154,0.04) 1px,transparent 1px); background-size: 60px 60px; pointer-events:none; }
+
+        /* LAYOUT */
+        .pg { position: relative; z-index: 10; min-height: 100vh; display: flex; flex-direction: column; }
+
+        /* NAV */
+        .topnav {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 0 5%; height: 65px;
+          background: rgba(6,14,26,0.8); backdrop-filter: blur(12px);
+          border-bottom: 1px solid rgba(255,255,255,0.07);
+          position: sticky; top: 0; z-index: 100;
+        }
+        .logo { font-size: 1.4rem; font-weight: 800; color: white; text-decoration: none; letter-spacing: -0.02em; }
+        .logo span { color: #4ade80; }
+        .back-btn {
+          background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.8);
+          border: 1px solid rgba(255,255,255,0.15); padding: 8px 18px;
+          border-radius: 4px; cursor: pointer; font-size: 0.82rem; font-weight: 600;
+          font-family: 'DM Sans',sans-serif; text-decoration: none;
+          transition: all 0.2s;
+        }
+        .back-btn:hover { background: rgba(255,255,255,0.12); }
+
+        /* CONTENU */
+        .main { flex: 1; padding: 40px 5% 60px; }
+        .ctn { max-width: 660px; margin: 0 auto; }
+
         .hero { text-align: center; margin-bottom: 32px; }
-        .hero h1 { font-family: 'Playfair Display', serif; font-size: clamp(1.8rem,5vw,2.6rem); color: white; margin-bottom: 10px; line-height: 1.2; }
-        .hero p { color: rgba(255,255,255,0.7); font-size: 1rem; }
-        
+        .hero h1 { font-family: 'DM Sans',sans-serif; font-size: clamp(1.6rem,4vw,2.2rem); font-weight: 800; color: white; margin-bottom: 8px; letter-spacing: -0.02em; }
+        .hero p { color: rgba(255,255,255,0.45); font-size: 0.95rem; }
+
         /* CARTE FORMULAIRE */
-        .form-card { background: rgba(255,255,255,0.97); border-radius: 24px; padding: 32px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
-        
-        /* SECTIONS */
-        .sec { border-radius: 14px; padding: 20px; margin-bottom: 18px; }
-        .sec-bleu { background: #f0f6ff; border: 2px solid #bbd0eb; }
-        .sec-vert { background: #f0faf5; border: 2px solid #9dd0b8; }
-        .sec-titre { font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 14px; }
+        .form-card {
+          background: rgba(255,255,255,0.96);
+          border-radius: 6px;
+          padding: 28px;
+          box-shadow: 0 24px 64px rgba(0,0,0,0.4);
+          border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .sec { border-radius: 6px; padding: 18px; margin-bottom: 16px; }
+        .sec-bleu { background: #eef4fd; border: 1.5px solid #bacfe8; }
+        .sec-vert { background: #edf7f3; border: 1.5px solid #9ecfba; }
+        .sec-titre { font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
         .st-bleu { color: #1a4870; }
         .st-vert { color: #0a6b52; }
-        
-        /* CHAMPS */
-        .label { display: block; font-size: 0.82rem; font-weight: 700; color: #334155; margin-bottom: 5px; }
-        .field { width: 100%; padding: 12px 14px; border: 2px solid #94a3b8; border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: 0.93rem; color: #1e293b; background: white; outline: none; transition: all 0.2s; }
-        .field:focus { border-color: #1a5c9a; box-shadow: 0 0 0 3px rgba(26,92,154,0.12); }
-        .field-sel { appearance: none; background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231a5c9a' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center; cursor: pointer; }
-        .field-sel:disabled { opacity: 0.4; cursor: not-allowed; }
-        .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-        @media(max-width:500px){.g2{grid-template-columns:1fr;}}
-        
-        /* PHOTO */
-        .photo-row { display: flex; gap: 12px; }
-        .photo-btn { flex: 1; background: white; border-radius: 12px; padding: 16px 10px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; font-family: 'DM Sans', sans-serif; font-weight: 700; font-size: 0.82rem; transition: all 0.2s; }
-        .photo-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.1); }
-        .pb-bleu { border: 2px solid #1a5c9a; color: #1a5c9a; }
-        .pb-vert { border: 2px solid #0e8a6e; color: #0e8a6e; }
-        
-        /* BOUTON ANALYSER */
-        .btn-go { width: 100%; padding: 18px; border-radius: 50px; border: none; font-family: 'DM Sans', sans-serif; font-size: 1.05rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; transition: all 0.25s; margin-top: 4px; }
-        .btn-go-on { background: linear-gradient(135deg, #1a5c9a 0%, #0e8a6e 100%); color: white; box-shadow: 0 6px 28px rgba(26,92,154,0.45); }
-        .btn-go-on:hover { transform: translateY(-2px); box-shadow: 0 10px 36px rgba(26,92,154,0.5); }
-        .btn-go-off { background: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
-        
-        .spin { width: 22px; height: 22px; border: 3px solid rgba(255,255,255,0.35); border-top-color: white; border-radius: 50%; animation: sp 0.7s linear infinite; }
-        .spin-b { width: 22px; height: 22px; border: 3px solid #c3d2e8; border-top-color: #1a5c9a; border-radius: 50%; animation: sp 0.7s linear infinite; flex-shrink: 0; }
-        @keyframes sp { to{transform:rotate(360deg);} }
-        
-        .err { background: #fef2f2; border: 2px solid #f87171; color: #b91c1c; padding: 12px 16px; border-radius: 10px; margin-bottom: 14px; font-size: 0.88rem; }
 
-        /* CARTE RÉSULTAT */
-        .res-card { background: white; border-radius: 24px; padding: 32px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); animation: fadeUp 0.4s ease; }
-        @keyframes fadeUp { from{opacity:0;transform:translateY(20px);} to{opacity:1;transform:translateY(0);} }
-        
-        .badge-niv { display: inline-flex; align-items: center; gap: 8px; padding: 8px 20px; border-radius: 50px; font-weight: 800; font-size: 0.85rem; margin-bottom: 18px; border: 2px solid; }
-        .res-titre { font-family: 'Playfair Display', serif; font-size: 1.5rem; color: #1e293b; margin-bottom: 12px; line-height: 1.3; }
-        .badge-info { display: inline-flex; align-items: center; gap: 5px; padding: 4px 12px; border-radius: 50px; font-size: 0.78rem; font-weight: 700; margin-right: 6px; margin-bottom: 14px; }
-        .bi-bleu { background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; }
-        .bi-vert { background: #dcfce7; color: #15803d; border: 1.5px solid #86efac; }
-        .res-texte { color: #475569; line-height: 1.85; font-size: 0.97rem; margin-bottom: 20px; }
-        
-        .conseils-bloc { background: #f8faff; border: 2px solid #c3d2e8; border-radius: 14px; padding: 18px; margin-bottom: 24px; }
-        .conseils-titre { font-weight: 800; font-size: 0.88rem; color: #1e293b; margin-bottom: 10px; }
-        .conseils-liste { padding-left: 18px; }
-        .conseils-liste li { color: #475569; margin-bottom: 7px; font-size: 0.9rem; line-height: 1.5; }
-        
-        /* MÉDECINS */
-        .sep { border-top: 2px solid #e2e8f0; padding-top: 24px; margin-top: 8px; }
-        .sec-h3 { font-family: 'Playfair Display', serif; font-size: 1.2rem; color: #1e293b; margin-bottom: 16px; }
-        
-        .med-card { background: #f8faff; border: 2px solid #bbd0eb; border-radius: 16px; padding: 18px 20px; margin-bottom: 12px; display: flex; gap: 16px; align-items: flex-start; }
+        .label { display: block; font-size: 0.8rem; font-weight: 700; color: #334155; margin-bottom: 5px; }
+        .field { width: 100%; padding: 11px 13px; border: 1.5px solid #94a3b8; border-radius: 6px; font-family: 'DM Sans',sans-serif; font-size: 0.9rem; color: #1e293b; background: white; outline: none; transition: all 0.2s; }
+        .field:focus { border-color: #1a5c9a; box-shadow: 0 0 0 3px rgba(26,92,154,0.1); }
+        .field-sel { appearance: none; background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231a5c9a' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center; cursor: pointer; }
+        .field-sel:disabled { opacity: 0.38; cursor: not-allowed; }
+        .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        @media(max-width:480px){.g2{grid-template-columns:1fr;}}
+
+        /* PHOTO */
+        .photo-row { display: flex; gap: 10px; }
+        .pbtn { flex: 1; background: white; border-radius: 6px; padding: 14px 10px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 5px; font-family: 'DM Sans',sans-serif; font-weight: 700; font-size: 0.8rem; transition: all 0.2s; }
+        .pbtn:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,0.1); }
+        .pb-b { border: 1.5px solid #1a5c9a; color: #1a5c9a; }
+        .pb-v { border: 1.5px solid #0e8a6e; color: #0e8a6e; }
+
+        /* BOUTON ANALYSER */
+        .btn-go {
+          width: 100%; padding: 16px; border-radius: 4px; border: none;
+          font-family: 'DM Sans',sans-serif; font-size: 1rem; font-weight: 800;
+          cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px;
+          transition: all 0.25s; margin-top: 4px;
+          clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+        }
+        .btn-on { background: linear-gradient(135deg,#1a5c9a,#0e8a6e); color: white; box-shadow: 0 6px 24px rgba(26,92,154,0.35); }
+        .btn-on:hover { transform: translateY(-2px); box-shadow: 0 10px 32px rgba(26,92,154,0.45); }
+        .btn-off { background: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
+
+        .spin { width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: sp 0.7s linear infinite; }
+        .spin-b { width: 20px; height: 20px; border: 3px solid #c3d2e8; border-top-color: #1a5c9a; border-radius: 50%; animation: sp 0.7s linear infinite; flex-shrink: 0; }
+        @keyframes sp { to{transform:rotate(360deg);} }
+
+        .err { background: #fef2f2; border: 1.5px solid #f87171; color: #b91c1c; padding: 11px 15px; border-radius: 6px; margin-bottom: 14px; font-size: 0.86rem; }
+
+        /* RÉSULTAT */
+        .res-card {
+          background: rgba(255,255,255,0.97);
+          border-radius: 6px; padding: 28px;
+          box-shadow: 0 24px 64px rgba(0,0,0,0.4);
+          animation: fadeUp 0.4s ease;
+          border: 1px solid rgba(255,255,255,0.1);
+          border-left: 5px solid #1a5c9a;
+        }
+        @keyframes fadeUp { from{opacity:0;transform:translateY(16px);} to{opacity:1;transform:translateY(0);} }
+
+        .badge-niv { display: inline-flex; align-items: center; gap: 8px; padding: 7px 18px; border-radius: 4px; font-weight: 800; font-size: 0.82rem; margin-bottom: 16px; border: 1.5px solid; }
+        .res-h2 { font-family: 'DM Sans',sans-serif; font-weight: 800; font-size: 1.3rem; color: #1e293b; margin-bottom: 12px; letter-spacing: -0.02em; }
+        .badge-i { display: inline-flex; align-items: center; gap: 5px; padding: 3px 11px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; margin-right: 6px; margin-bottom: 14px; }
+        .bi-b { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; }
+        .bi-v { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+
+        .res-txt { color: #475569; line-height: 1.85; font-size: 0.93rem; margin-bottom: 18px; }
+        .conseils { background: #f8faff; border: 1.5px solid #c3d2e8; border-radius: 6px; padding: 16px; margin-bottom: 22px; }
+        .conseils strong { font-size: 0.85rem; color: #1e293b; }
+        .conseils ul { margin-top: 8px; padding-left: 17px; }
+        .conseils li { color: #475569; margin-bottom: 6px; font-size: 0.87rem; line-height: 1.5; }
+
+        /* SECTION MÉDECINS */
+        .sep { border-top: 1.5px solid #e2e8f0; padding-top: 22px; margin-top: 4px; }
+        .sec-h3 { font-weight: 800; font-size: 1.05rem; color: #1e293b; margin-bottom: 14px; letter-spacing: -0.01em; }
+
+        .med-card { background: #f4f8fd; border: 1.5px solid #bbd0eb; border-radius: 6px; padding: 15px 16px; margin-bottom: 10px; display: flex; gap: 14px; align-items: flex-start; }
         .med-info { flex: 1; }
-        .med-nom { font-weight: 800; color: #1e293b; font-size: 0.97rem; margin-bottom: 4px; }
-        .med-spec { color: #1a5c9a; font-size: 0.8rem; font-weight: 700; margin-bottom: 6px; }
-        .med-ligne { display: flex; align-items: center; gap: 6px; color: #64748b; font-size: 0.8rem; margin-bottom: 3px; }
+        .med-nom { font-weight: 800; color: #1e293b; font-size: 0.92rem; margin-bottom: 3px; }
+        .med-spec { color: #1a5c9a; font-size: 0.78rem; font-weight: 700; margin-bottom: 5px; }
+        .med-ligne { display: flex; align-items: center; gap: 5px; color: #64748b; font-size: 0.78rem; margin-bottom: 2px; }
         .med-tel { color: #1a5c9a; font-weight: 700; text-decoration: none; }
         .med-tel:hover { text-decoration: underline; }
-        .tag-tel { display: inline-flex; align-items: center; gap: 4px; background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; padding: 2px 8px; border-radius: 50px; font-size: 0.7rem; font-weight: 700; margin-top: 5px; }
-        
-        .med-btns { display: flex; flex-direction: column; gap: 8px; min-width: 115px; }
-        .mbtn { display: block; padding: 10px 14px; border-radius: 50px; font-family: 'DM Sans', sans-serif; font-size: 0.78rem; font-weight: 800; text-align: center; text-decoration: none; cursor: pointer; transition: all 0.2s; border: none; white-space: nowrap; }
-        .mbtn:hover { transform: translateY(-1px); filter: brightness(1.1); }
-        .mb-bleu { background: #1a5c9a; color: white; box-shadow: 0 3px 10px rgba(26,92,154,0.3); }
-        .mb-vert { background: #0e8a6e; color: white; box-shadow: 0 3px 10px rgba(14,138,110,0.3); }
+        .tag-tc { display: inline-flex; align-items: center; gap: 4px; background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; padding: 2px 8px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; margin-top: 4px; }
 
-        /* FALLBACK LIENS */
-        .fallback-box { background: linear-gradient(135deg, #f0f6ff, #f0faf5); border: 2px solid #bbd0eb; border-radius: 16px; padding: 24px; text-align: center; }
-        .fallback-titre { font-weight: 700; color: #1e293b; font-size: 1rem; margin-bottom: 6px; }
-        .fallback-sub { color: #64748b; font-size: 0.85rem; margin-bottom: 18px; }
-        .lien-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 400px; margin: 0 auto; }
+        .med-btns { display: flex; flex-direction: column; gap: 7px; min-width: 108px; }
+        .mbtn { display: block; padding: 9px 12px; border-radius: 4px; font-family: 'DM Sans',sans-serif; font-size: 0.76rem; font-weight: 800; text-align: center; text-decoration: none; cursor: pointer; transition: all 0.2s; border: none; white-space: nowrap; clip-path: polygon(0 0,calc(100% - 6px) 0,100% 6px,100% 100%,6px 100%,0 calc(100% - 6px)); }
+        .mbtn:hover { filter: brightness(1.15); transform: translateY(-1px); }
+        .mb-b { background: #1a5c9a; color: white; }
+        .mb-v { background: #0e8a6e; color: white; }
+
+        /* FALLBACK */
+        .fallback { background: linear-gradient(135deg,#f0f6ff,#f0faf5); border: 1.5px solid #bbd0eb; border-radius: 6px; padding: 22px; text-align: center; margin-top: 4px; }
+        .fallback-t { font-weight: 800; color: #1e293b; font-size: 0.95rem; margin-bottom: 4px; }
+        .fallback-s { color: #64748b; font-size: 0.82rem; margin-bottom: 16px; }
+        .lien-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; max-width: 420px; margin: 0 auto; }
         @media(max-width:400px){.lien-grid{grid-template-columns:1fr;}}
-        .lien-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 10px; border-radius: 14px; text-decoration: none; font-family: 'DM Sans', sans-serif; font-weight: 800; font-size: 0.85rem; transition: all 0.25s; }
-        .lien-btn:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
-        .lien-btn span { font-size: 1.5rem; }
-        .lb-doctolib { background: #0596DE; color: white; }
-        .lb-teleconsult { background: linear-gradient(135deg,#1a5c9a,#0e8a6e); color: white; }
-        .lb-keldoc { background: #6366f1; color: white; }
-        .lb-maiia { background: #0891b2; color: white; }
-        
-        .mention { background: #fff7ed; border: 2px solid #fcd34d; border-radius: 14px; padding: 14px 18px; font-size: 0.8rem; color: #92400e; margin-top: 20px; line-height: 1.7; }
-        .btn-new { background: transparent; border: 2px solid #1a5c9a; color: #1a5c9a; padding: 11px 28px; border-radius: 50px; cursor: pointer; margin-top: 18px; font-weight: 700; font-family: 'DM Sans', sans-serif; font-size: 0.9rem; transition: all 0.2s; }
-        .btn-new:hover { background: #f0f6ff; }
-        .load-box { display: flex; align-items: center; gap: 12px; background: #f0f6ff; border: 2px solid #bbd0eb; border-radius: 14px; padding: 18px 20px; color: #1a5c9a; font-size: 0.9rem; font-weight: 600; }
+        .lbtn { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 8px; border-radius: 4px; text-decoration: none; font-family: 'DM Sans',sans-serif; font-weight: 800; font-size: 0.82rem; transition: all 0.2s; clip-path: polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px)); }
+        .lbtn:hover { transform: translateY(-3px); filter: brightness(1.1); }
+        .lbtn span { font-size: 1.4rem; }
+        .lbtn small { font-weight: 400; font-size: 0.68rem; opacity: 0.85; }
+        .lb-doc { background: #0596DE; color: white; }
+        .lb-tc { background: linear-gradient(135deg,#1a5c9a,#0e8a6e); color: white; }
+        .lb-kel { background: #6366f1; color: white; }
+
+        .mention { background: #fffbeb; border: 1.5px solid #fcd34d; border-radius: 6px; padding: 13px 16px; font-size: 0.78rem; color: #92400e; margin-top: 18px; line-height: 1.7; }
+        .btn-new { background: transparent; border: 1.5px solid rgba(255,255,255,0.3); color: rgba(255,255,255,0.7); padding: 10px 24px; border-radius: 4px; cursor: pointer; margin-top: 16px; font-weight: 700; font-family: 'DM Sans',sans-serif; font-size: 0.87rem; transition: all 0.2s; }
+        .btn-new:hover { background: rgba(255,255,255,0.08); color: white; }
+
+        .load-med { display: flex; align-items: center; gap: 12px; background: #eef4fd; border: 1.5px solid #bbd0eb; border-radius: 6px; padding: 16px 18px; color: #1a5c9a; font-size: 0.87rem; font-weight: 600; }
       `}</style>
 
-      {/* NAV */}
-      <nav style={{position:'fixed',top:0,left:0,right:0,zIndex:100,background:'rgba(15,41,66,0.95)',backdropFilter:'blur(10px)',borderBottom:'1px solid rgba(255,255,255,0.1)',padding:'0 5%',height:'65px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-        <Link href="/" style={{fontFamily:'Playfair Display,serif',fontSize:'1.4rem',fontWeight:'700',color:'white',textDecoration:'none'}}>
-          Medi<span style={{color:'#4ade80'}}>Connect</span>
-        </Link>
-        <Link href="/" style={{textDecoration:'none'}}>
-          <button style={{background:'rgba(255,255,255,0.12)',color:'white',border:'1.5px solid rgba(255,255,255,0.25)',padding:'8px 20px',borderRadius:'50px',cursor:'pointer',fontSize:'0.85rem',fontWeight:'600',fontFamily:'DM Sans,sans-serif'}}>
-            ← Accueil
-          </button>
-        </Link>
-      </nav>
+      {/* FOND */}
+      <div className="bg-bands">
+        <div className="band b1"></div>
+        <div className="band b2"></div>
+        <div className="band b3"></div>
+      </div>
+      <div className="grid-ov"></div>
 
       <div className="pg">
-        <div className="ctn">
+        {/* NAV */}
+        <nav className="topnav">
+          <Link href="/" className="logo">Medi<span>Connect</span></Link>
+          <Link href="/" className="back-btn">← Accueil</Link>
+        </nav>
 
-          {/* HERO */}
-          <div className="hero">
-            <h1>Analysez vos symptômes</h1>
-            <p>Notre IA vous oriente et trouve les médecins disponibles près de chez vous</p>
-          </div>
+        <div className="main">
+          <div className="ctn">
+            <div className="hero">
+              <h1>Analysez vos symptômes</h1>
+              <p>Notre IA vous oriente et trouve les médecins disponibles près de chez vous</p>
+            </div>
 
-          {/* FORMULAIRE */}
-          {!resultat && (
-            <div className="form-card">
+            {!resultat && (
+              <div className="form-card">
 
-              {/* SYMPTÔMES */}
-              <div className="sec sec-bleu">
-                <div className="sec-titre st-bleu">📝 Décrivez vos symptômes</div>
-                <textarea className="field" style={{minHeight:'110px',resize:'vertical'}}
-                  placeholder="Ex : douleur dans le dos depuis une semaine, difficultés à me lever le matin..."
-                  value={symptomes} onChange={e => setSymptomes(e.target.value)}/>
-              </div>
-
-              {/* PHOTO */}
-              <div className="sec sec-vert">
-                <div className="sec-titre st-vert">
-                  📸 Photo <span style={{fontWeight:'400',textTransform:'none',fontSize:'0.78rem',color:'#64748b'}}>(optionnel — lésions, plaies, boutons...)</span>
+                {/* SYMPTÔMES */}
+                <div className="sec sec-bleu">
+                  <div className="sec-titre st-bleu">📝 Vos symptômes</div>
+                  <textarea className="field" style={{minHeight:'105px',resize:'vertical'}}
+                    placeholder="Ex : douleur dans le dos depuis une semaine, difficultés à me lever le matin..."
+                    value={symptomes} onChange={e => setSymptomes(e.target.value)}/>
                 </div>
-                {!photoPreview ? (
-                  <div className="photo-row">
-                    <button className="photo-btn pb-bleu" onClick={() => fileRef.current?.click()}>
-                      <span style={{fontSize:'1.8rem'}}>🖼️</span>
-                      Galerie photo
-                      <span style={{fontSize:'0.7rem',color:'#94a3b8',fontWeight:'400'}}>Choisir un fichier</span>
-                    </button>
-                    <button className="photo-btn pb-vert" onClick={() => cameraRef.current?.click()}>
-                      <span style={{fontSize:'1.8rem'}}>📷</span>
-                      Appareil photo
-                      <span style={{fontSize:'0.7rem',color:'#94a3b8',fontWeight:'400'}}>Prendre une photo</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{position:'relative',display:'inline-block'}}>
-                    <img src={photoPreview} alt="Photo" style={{maxWidth:'100%',maxHeight:'180px',borderRadius:'12px',border:'2px solid #9dd0b8',display:'block'}}/>
-                    <button onClick={supprimerPhoto} style={{position:'absolute',top:'8px',right:'8px',background:'#dc2626',color:'white',border:'none',borderRadius:'50%',width:'28px',height:'28px',cursor:'pointer',fontSize:'0.85rem',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:'700'}}>✕</button>
-                    <p style={{marginTop:'6px',fontSize:'0.8rem',color:'#0e8a6e',fontWeight:'700'}}>✅ {photo?.name}</p>
-                  </div>
-                )}
-                <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={e => handlePhoto(e.target.files?.[0])}/>
-                <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={e => handlePhoto(e.target.files?.[0])}/>
-              </div>
 
-              {/* ÂGE + DURÉE */}
-              <div className="g2" style={{marginBottom:'18px'}}>
-                <div>
-                  <label className="label">👤 Âge</label>
-                  <select className="field field-sel" value={age} onChange={e => setAge(e.target.value)}>
-                    <option value="">Non précisé</option>
-                    <option value="enfant (moins de 12 ans)">Enfant (- 12 ans)</option>
-                    <option value="adolescent (12-17 ans)">Adolescent</option>
-                    <option value="jeune adulte (18-30 ans)">18-30 ans</option>
-                    <option value="adulte (30-50 ans)">30-50 ans</option>
-                    <option value="adulte (50-65 ans)">50-65 ans</option>
-                    <option value="senior (65 ans et plus)">Senior 65+</option>
-                  </select>
+                {/* PHOTO */}
+                <div className="sec sec-vert">
+                  <div className="sec-titre st-vert">📸 Photo <span style={{fontWeight:'400',textTransform:'none',fontSize:'0.75rem',color:'#64748b'}}>(optionnel — lésions, plaies, boutons...)</span></div>
+                  {!photoPreview ? (
+                    <div className="photo-row">
+                      <button className="pbtn pb-b" onClick={() => fileRef.current?.click()}>
+                        <span style={{fontSize:'1.6rem'}}>🖼️</span>
+                        Galerie photo
+                        <span style={{fontSize:'0.68rem',color:'#94a3b8',fontWeight:'400'}}>Choisir un fichier</span>
+                      </button>
+                      <button className="pbtn pb-v" onClick={() => cameraRef.current?.click()}>
+                        <span style={{fontSize:'1.6rem'}}>📷</span>
+                        Appareil photo
+                        <span style={{fontSize:'0.68rem',color:'#94a3b8',fontWeight:'400'}}>Prendre une photo</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{position:'relative',display:'inline-block'}}>
+                      <img src={photoPreview} alt="Photo" style={{maxWidth:'100%',maxHeight:'170px',borderRadius:'6px',border:'1.5px solid #9ecfba',display:'block'}}/>
+                      <button onClick={supprimerPhoto} style={{position:'absolute',top:'6px',right:'6px',background:'#dc2626',color:'white',border:'none',borderRadius:'3px',width:'26px',height:'26px',cursor:'pointer',fontSize:'0.8rem',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:'800'}}>✕</button>
+                      <p style={{marginTop:'5px',fontSize:'0.78rem',color:'#0e8a6e',fontWeight:'700'}}>✅ {photo?.name}</p>
+                    </div>
+                  )}
+                  <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={e => handlePhoto(e.target.files?.[0])}/>
+                  <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={e => handlePhoto(e.target.files?.[0])}/>
                 </div>
-                <div>
-                  <label className="label">⏱️ Depuis combien de temps ?</label>
-                  <select className="field field-sel" value={duree} onChange={e => setDuree(e.target.value)}>
-                    <option value="">Non précisé</option>
-                    <option value="quelques heures">Quelques heures</option>
-                    <option value="depuis hier">Depuis hier</option>
-                    <option value="2 à 3 jours">2-3 jours</option>
-                    <option value="une semaine">Une semaine</option>
-                    <option value="plus d'une semaine">+ d'une semaine</option>
-                    <option value="plus d'un mois">+ d'un mois</option>
-                  </select>
-                </div>
-              </div>
 
-              {/* LOCALISATION */}
-              <div className="sec sec-bleu" style={{marginBottom:'20px'}}>
-                <div className="sec-titre st-bleu">📍 Votre localisation</div>
-                <div className="g2">
+                {/* ÂGE + DURÉE */}
+                <div className="g2" style={{marginBottom:'16px'}}>
                   <div>
-                    <label className="label">📮 Code postal</label>
-                    <input className="field" type="text" placeholder="57, 572, 57200..." value={cpInput} maxLength={5} onChange={handleCp}/>
-                    {cpLoading && <p style={{fontSize:'0.72rem',color:'#1a5c9a',marginTop:'4px',fontWeight:'600'}}>🔍 Recherche...</p>}
-                    {villes.length > 0 && !cpLoading && <p style={{fontSize:'0.72rem',color:'#0e8a6e',marginTop:'4px',fontWeight:'700'}}>✅ {villes.length} commune{villes.length>1?'s':''}</p>}
-                    {cpInput.length >= 2 && villes.length === 0 && !cpLoading && <p style={{fontSize:'0.72rem',color:'#e67e22',marginTop:'4px'}}>⚠️ Aucune commune trouvée</p>}
+                    <label className="label">👤 Âge</label>
+                    <select className="field field-sel" value={age} onChange={e => setAge(e.target.value)}>
+                      <option value="">Non précisé</option>
+                      <option value="enfant (moins de 12 ans)">Enfant (- 12 ans)</option>
+                      <option value="adolescent (12-17 ans)">Adolescent</option>
+                      <option value="jeune adulte (18-30 ans)">18-30 ans</option>
+                      <option value="adulte (30-50 ans)">30-50 ans</option>
+                      <option value="adulte (50-65 ans)">50-65 ans</option>
+                      <option value="senior (65 ans et plus)">Senior 65+</option>
+                    </select>
                   </div>
                   <div>
-                    <label className="label">🏙️ Ville / commune</label>
-                    <select className="field field-sel" value={ville} onChange={e => setVille(e.target.value)} disabled={villes.length === 0}>
-                      <option value="">{villes.length === 0 ? '← Code postal d\'abord' : 'Sélectionnez'}</option>
-                      {villes.map(v => <option key={v.nom+v.codePostal} value={v.nom}>{v.nom} — {v.codePostal}</option>)}
+                    <label className="label">⏱️ Depuis combien de temps ?</label>
+                    <select className="field field-sel" value={duree} onChange={e => setDuree(e.target.value)}>
+                      <option value="">Non précisé</option>
+                      <option value="quelques heures">Quelques heures</option>
+                      <option value="depuis hier">Depuis hier</option>
+                      <option value="2 à 3 jours">2-3 jours</option>
+                      <option value="une semaine">Une semaine</option>
+                      <option value="plus d'une semaine">+ d'une semaine</option>
+                      <option value="plus d'un mois">+ d'un mois</option>
                     </select>
                   </div>
                 </div>
-              </div>
 
-              {erreur && <div className="err">⚠️ {erreur}</div>}
-
-              <button className={`btn-go ${peutAnalyser?'btn-go-on':'btn-go-off'}`} onClick={analyser} disabled={!peutAnalyser}>
-                {loading ? <><div className="spin"></div>Analyse en cours...</> : <>🔍 Analyser mes symptômes{photo?' + photo':''}</>}
-              </button>
-              <p style={{textAlign:'center',marginTop:'10px',fontSize:'0.74rem',color:'#94a3b8'}}>🔒 Données non sauvegardées · Résultat en ~15 secondes</p>
-            </div>
-          )}
-
-          {/* RÉSULTAT */}
-          {resultat && niv && (
-            <div className="res-card">
-              <div className="badge-niv" style={{background:niv.bg,color:niv.color,borderColor:niv.border}}>
-                {niv.emoji} {niv.texte}
-              </div>
-
-              <h2 className="res-titre">Spécialiste recommandé :<br/>{resultat.specialiste}</h2>
-
-              <div>
-                {(ville||cpInput) && <span className="badge-info bi-bleu">📍 {ville?`${ville} (${cpInput})`:cpInput}</span>}
-                {photo && <span className="badge-info bi-vert">📸 Photo analysée</span>}
-              </div>
-
-              <p className="res-texte">{resultat.explication}</p>
-
-              {resultat.conseils?.length > 0 && (
-                <div className="conseils-bloc">
-                  <div className="conseils-titre">💡 Conseils pratiques</div>
-                  <ul className="conseils-liste">
-                    {resultat.conseils.map((c,i) => <li key={i}>{c}</li>)}
-                  </ul>
+                {/* LOCALISATION */}
+                <div className="sec sec-bleu" style={{marginBottom:'20px'}}>
+                  <div className="sec-titre st-bleu">📍 Votre localisation</div>
+                  <div className="g2">
+                    <div>
+                      <label className="label">📮 Code postal / département</label>
+                      <input className="field" type="text" placeholder="Ex: 57, 75, 33, 57200..." value={cpInput} maxLength={5} onChange={handleCp}/>
+                      {cpLoading && <p style={{fontSize:'0.7rem',color:'#1a5c9a',marginTop:'4px',fontWeight:'600'}}>🔍 Recherche...</p>}
+                      {villes.length > 0 && !cpLoading && <p style={{fontSize:'0.7rem',color:'#0e8a6e',marginTop:'4px',fontWeight:'700'}}>✅ {villes.length} commune{villes.length>1?'s':''} trouvée{villes.length>1?'s':''}</p>}
+                      {cpInput.length >= 2 && villes.length === 0 && !cpLoading && <p style={{fontSize:'0.7rem',color:'#e67e22',marginTop:'4px'}}>⚠️ Aucune commune trouvée</p>}
+                    </div>
+                    <div>
+                      <label className="label">🏙️ Ville / commune</label>
+                      <select className="field field-sel" value={ville} onChange={e => setVille(e.target.value)} disabled={villes.length === 0}>
+                        <option value="">{villes.length === 0 ? '← Entrez un code postal' : 'Sélectionnez'}</option>
+                        {villes.map(v => <option key={v.nom+(v.codePostal||'')} value={v.nom}>{v.nom}{v.codePostal ? ` — ${v.codePostal}` : ''}</option>)}
+                      </select>
+                    </div>
+                  </div>
                 </div>
-              )}
 
-              {/* MÉDECINS */}
-              <div className="sep">
-                <h3 className="sec-h3">
-                  🏥 {resultat.specialiste}s {ville?`à ${ville}`:cpInput?`(${cpInput})`:'près de chez vous'}
-                </h3>
+                {erreur && <div className="err">⚠️ {erreur}</div>}
 
-                {medLoading && (
-                  <div className="load-box">
-                    <div className="spin-b"></div>
-                    Recherche dans l'annuaire officiel de santé...
+                <button className={`btn-go ${peutAnalyser?'btn-on':'btn-off'}`} onClick={analyser} disabled={!peutAnalyser}>
+                  {loading ? <><div className="spin"></div>Analyse en cours...</> : <>🔍 Analyser{photo?' + photo':''}</>}
+                </button>
+                <p style={{textAlign:'center',marginTop:'10px',fontSize:'0.72rem',color:'#94a3b8'}}>🔒 Données non sauvegardées · ~15 secondes</p>
+              </div>
+            )}
+
+            {/* RÉSULTAT */}
+            {resultat && niv && (
+              <div className="res-card">
+                <div className="badge-niv" style={{background:niv.bg,color:niv.color,borderColor:niv.border}}>{niv.emoji} {niv.texte}</div>
+                <h2 className="res-h2">Spécialiste recommandé : {resultat.specialiste}</h2>
+                <div>
+                  {(ville||cpInput) && <span className="badge-i bi-b">📍 {ville?`${ville} (${cpInput})`:cpInput}</span>}
+                  {photo && <span className="badge-i bi-v">📸 Photo analysée</span>}
+                </div>
+                <p className="res-txt">{resultat.explication}</p>
+                {resultat.conseils?.length > 0 && (
+                  <div className="conseils">
+                    <strong>💡 Conseils pratiques</strong>
+                    <ul>{resultat.conseils.map((c,i) => <li key={i}>{c}</li>)}</ul>
                   </div>
                 )}
 
-                {!medLoading && medecins.map((m,i) => (
-                  <div className="med-card" key={i}>
-                    <div className="med-info">
-                      <div className="med-nom">{m.nom}</div>
-                      <div className="med-spec">🩺 {m.specialite}</div>
-                      {m.adresse && <div className="med-ligne">📍 {m.adresse}</div>}
-                      {m.telephone && <div className="med-ligne">📞 <a href={`tel:${m.telephone}`} className="med-tel">{m.telephone}</a></div>}
-                      {m.horaires && <div className="med-ligne">🕐 {m.horaires}</div>}
-                      {m.teleconsultation && <span className="tag-tel">📹 Téléconsultation</span>}
-                    </div>
-                    <div className="med-btns">
-                      <a href={m.urlRdv || liens?.presentiel} target="_blank" rel="noopener noreferrer" className="mbtn mb-bleu">📅 Prendre RDV</a>
-                      <a href={m.urlTeleconsult || liens?.teleconsult} target="_blank" rel="noopener noreferrer" className="mbtn mb-vert">📹 Téléconsult.</a>
-                    </div>
-                  </div>
-                ))}
+                <div className="sep">
+                  <h3 className="sec-h3">🏥 {resultat.specialiste}s {ville?`à ${ville}`:cpInput?`(${cpInput})`:'près de chez vous'}</h3>
 
-                {/* FALLBACK avec vrais liens */}
-                {!medLoading && (
-                  <div className="fallback-box" style={{marginTop: medecins.length > 0 ? '16px' : '0'}}>
-                    <div className="fallback-titre">
-                      {medecins.length > 0 ? '🔗 Voir plus de praticiens' : `Trouver un(e) ${resultat.specialiste}`}
+                  {medLoading && <div className="load-med"><div className="spin-b"></div>Recherche dans l'annuaire officiel...</div>}
+
+                  {!medLoading && medecins.map((m,i) => (
+                    <div className="med-card" key={i}>
+                      <div className="med-info">
+                        <div className="med-nom">{m.nom}</div>
+                        <div className="med-spec">🩺 {m.specialite}</div>
+                        {m.adresse && <div className="med-ligne">📍 {m.adresse}</div>}
+                        {m.telephone && <div className="med-ligne">📞 <a href={`tel:${m.telephone}`} className="med-tel">{m.telephone}</a></div>}
+                        {m.horaires && <div className="med-ligne">🕐 {m.horaires}</div>}
+                        {m.teleconsultation && <span className="tag-tc">📹 Téléconsultation</span>}
+                      </div>
+                      <div className="med-btns">
+                        <a href={m.urlRdv||liens?.presentiel||'#'} target="_blank" rel="noopener noreferrer" className="mbtn mb-b">📅 Prendre RDV</a>
+                        <a href={m.urlTeleconsult||liens?.teleconsult||'#'} target="_blank" rel="noopener noreferrer" className="mbtn mb-v">📹 Téléconsult.</a>
+                      </div>
                     </div>
-                    <div className="fallback-sub">
-                      {ville ? `À ${ville} et ses environs` : 'Sélectionnez votre ville pour des résultats personnalisés'}
-                    </div>
+                  ))}
+
+                  <div className="fallback" style={{marginTop: medecins.length > 0 ? '14px' : '0'}}>
+                    <div className="fallback-t">{medecins.length > 0 ? '🔗 Voir plus de praticiens' : `Trouver un(e) ${resultat.specialiste}`}</div>
+                    <div className="fallback-s">{ville?`À ${ville} et ses environs`:'Renseignez votre localisation pour des résultats personnalisés'}</div>
                     <div className="lien-grid">
-                      <a href={liens?.presentiel || '#'} target="_blank" rel="noopener noreferrer" className="lien-btn lb-doctolib">
-                        <span>🏥</span>Doctolib<br/><small style={{fontWeight:'400',fontSize:'0.72rem',opacity:0.85}}>RDV en cabinet</small>
+                      <a href={liens?.presentiel||'#'} target="_blank" rel="noopener noreferrer" className="lbtn lb-doc">
+                        <span>🏥</span>Doctolib<small>En cabinet</small>
                       </a>
-                      <a href={liens?.teleconsult || '#'} target="_blank" rel="noopener noreferrer" className="lien-btn lb-teleconsult">
-                        <span>📹</span>Téléconsultation<br/><small style={{fontWeight:'400',fontSize:'0.72rem',opacity:0.85}}>Sans se déplacer</small>
+                      <a href={liens?.teleconsult||'#'} target="_blank" rel="noopener noreferrer" className="lbtn lb-tc">
+                        <span>📹</span>Téléconsult.<small>À distance</small>
                       </a>
-                      <a href={liens?.keldoc || '#'} target="_blank" rel="noopener noreferrer" className="lien-btn lb-keldoc">
-                        <span>📅</span>Keldoc<br/><small style={{fontWeight:'400',fontSize:'0.72rem',opacity:0.85}}>Alternative Doctolib</small>
-                      </a>
-                      <a href={liens?.maiia || '#'} target="_blank" rel="noopener noreferrer" className="lien-btn lb-maiia">
-                        <span>📋</span>Maiia<br/><small style={{fontWeight:'400',fontSize:'0.72rem',opacity:0.85}}>RDV médecin</small>
+                      <a href={liens?.keldoc||'#'} target="_blank" rel="noopener noreferrer" className="lbtn lb-kel">
+                        <span>📅</span>Keldoc<small>Alternative</small>
                       </a>
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
 
-              <div className="mention">
-                ⚕️ <strong>Important :</strong> Cette analyse est fournie à titre informatif uniquement — elle ne remplace pas un diagnostic médical. En cas d'urgence vitale : <strong>15 (SAMU)</strong> ou <strong>112</strong>.
+                <div className="mention">⚕️ <strong>Important :</strong> Cette analyse est informative uniquement — elle ne remplace pas un diagnostic médical. En cas d'urgence vitale : <strong>15 (SAMU)</strong> ou <strong>112</strong>.</div>
+                <button className="btn-new" onClick={reset}>← Nouvelle analyse</button>
               </div>
-
-              <button className="btn-new" onClick={reset}>← Nouvelle analyse</button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </>
